@@ -410,6 +410,35 @@
         font-size: 13px;
       }
 
+      .pct-cell {
+        min-width: 190px;
+      }
+
+      .pct-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .pct-bar {
+        flex: 1;
+        min-width: 90px;
+        height: 8px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        overflow: hidden;
+      }
+
+      .pct-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #16a34a 0%, #eab308 50%, #dc2626 100%);
+      }
+
+      .tiny-note {
+        color: #64748b;
+        font-size: 12px;
+      }
+
       .right-rail {
         display: grid;
         gap: 12px;
@@ -521,6 +550,24 @@
                   <tbody></tbody>
                 </table>
               </div>
+            </div>
+
+            <div class="card">
+              <h2>Metric Percentile Panel</h2>
+              <p>Current value and historical percentile for key valuation, quality, and growth metrics.</p>
+              <div class="table-wrap">
+                <table id="stockMetricTable">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Current</th>
+                      <th>Percentile</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="muted" id="stockMetricStatus"></div>
             </div>
           </div>
 
@@ -641,6 +688,8 @@
       const macroSignalTableBody = document.querySelector("#macroSignalTable tbody");
       const macroTableHead = document.querySelector("#macroTable thead");
       const macroTableBody = document.querySelector("#macroTable tbody");
+      const stockMetricTableBody = document.querySelector("#stockMetricTable tbody");
+      const stockMetricStatusEl = document.getElementById("stockMetricStatus");
 
       let currentPriceRows = [];
       let currentFinancialRows = [];
@@ -768,6 +817,42 @@
         });
       }
 
+      function metricDisplayName(name) {
+        const mapping = {
+          pe_ttm: "PE (TTM)",
+          pb: "PB",
+          roe: "ROE",
+          roic: "ROIC",
+          revenue_cagr_5y: "Revenue CAGR (5Y)",
+        };
+        return mapping[name] || name;
+      }
+
+      function renderStockMetricRows(metrics) {
+        stockMetricTableBody.innerHTML = "";
+        metrics.forEach((item) => {
+          const percentileText = item.percentile == null ? "-" : `${item.percentile}%`;
+          const fillWidth = item.percentile == null ? 0 : item.percentile;
+          const hint =
+            item.data_insufficient || item.percentile == null
+              ? `<span class="tiny-note">data_insufficient (n=${item.sample_size ?? 0})</span>`
+              : "";
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${metricDisplayName(item.name)}</td>
+            <td>${formatNumber(item.value, 4)}</td>
+            <td class="pct-cell">
+              <div class="pct-wrap">
+                <span>${percentileText}</span>
+                <div class="pct-bar"><div class="pct-fill" style="width:${fillWidth}%"></div></div>
+              </div>
+              ${hint}
+            </td>
+          `;
+          stockMetricTableBody.appendChild(tr);
+        });
+      }
+
       async function analyzeSingleStock() {
         const code = stockCodeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
@@ -779,18 +864,27 @@
         singleStatusEl.textContent = "Analyzing and updating dashboard...";
 
         try {
-          const res = await fetch(`${apiBase}/api/analyze`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ stock_code: code }),
-          });
+          const [res, metricRes] = await Promise.all([
+            fetch(`${apiBase}/api/analyze`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ stock_code: code }),
+            }),
+            fetch(`${apiBase}/stock_metrics?symbol=${encodeURIComponent(code)}`),
+          ]);
           const data = await res.json();
+          const metricData = await metricRes.json();
           if (!res.ok) throw new Error(data.detail || "Request failed");
+          if (!metricRes.ok) throw new Error(metricData.detail || "Metric request failed");
 
           currentPriceRows = data.price_data || [];
           currentFinancialRows = data.financial_summary || [];
           renderPriceRows(currentPriceRows);
           renderFinancialRows(currentFinancialRows);
+          renderStockMetricRows(metricData.metrics || []);
+          stockMetricStatusEl.textContent = metricData.as_of
+            ? `As of: ${metricData.as_of}.`
+            : "As of: -";
           updateMetrics(data.symbol, currentPriceRows, currentFinancialRows);
 
           const warningText = (data.warnings || []).length
@@ -807,6 +901,8 @@
           currentFinancialRows = [];
           priceTableBody.innerHTML = "";
           financialTableBody.innerHTML = "";
+          stockMetricTableBody.innerHTML = "";
+          stockMetricStatusEl.textContent = "";
           priceMetaEl.textContent = "";
           resetMetrics();
         } finally {

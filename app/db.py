@@ -7,17 +7,20 @@ DB_PATH = Path(__file__).resolve().parent.parent / "investment.db"
 
 
 def _validate_table_name(table_name: str) -> None:
+    """Validate dynamic table name to prevent unsafe SQL interpolation."""
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
         raise ValueError("Invalid table name")
 
 
 def get_conn() -> sqlite3.Connection:
+    """Create a SQLite connection with dict-like row access."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db() -> None:
+    """Initialize core application tables if they do not exist."""
     conn = get_conn()
     cur = conn.cursor()
 
@@ -57,6 +60,7 @@ def init_db() -> None:
 
 
 def upsert_stock_prices(symbol: str, rows: list[dict[str, Any]]) -> None:
+    """Insert or update stock daily price rows for one symbol."""
     if not rows:
         return
 
@@ -95,6 +99,7 @@ def upsert_stock_prices(symbol: str, rows: list[dict[str, Any]]) -> None:
 
 
 def upsert_financial_reports(symbol: str, rows: list[dict[str, Any]]) -> None:
+    """Insert or update normalized financial rows for one symbol."""
     if not rows:
         return
 
@@ -131,6 +136,7 @@ def upsert_financial_reports(symbol: str, rows: list[dict[str, Any]]) -> None:
 
 
 def fetch_stock_prices(symbol: str) -> list[dict[str, Any]]:
+    """Fetch stored price history ordered by most recent trade date."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -148,6 +154,7 @@ def fetch_stock_prices(symbol: str) -> list[dict[str, Any]]:
 
 
 def fetch_financial_reports(symbol: str) -> list[dict[str, Any]]:
+    """Fetch stored financial rows ordered by latest report year."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -165,6 +172,7 @@ def fetch_financial_reports(symbol: str) -> list[dict[str, Any]]:
 
 
 def fetch_macro_indicators(table_name: str, limit: int = 30) -> list[dict[str, Any]]:
+    """Fetch latest macro rows from a validated table name."""
     _validate_table_name(table_name)
     conn = get_conn()
     cur = conn.cursor()
@@ -188,6 +196,8 @@ def fetch_macro_indicators(table_name: str, limit: int = 30) -> list[dict[str, A
 
 
 def fetch_macro_indicators_all(table_name: str) -> list[dict[str, Any]]:
+    """Fetch full macro history from a validated table name."""
+    # TODO: support streaming/chunked reads if dataset grows significantly.
     _validate_table_name(table_name)
     conn = get_conn()
     cur = conn.cursor()
