@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Investment Assistant Dashboard</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap");
+
+      :root {
+        --bg: #f8fafc;
+        --bg-elev: #ffffff;
+        --ink: #0f172a;
+        --ink-soft: #475569;
+        --line: #dbe3ef;
+        --primary: #1e40af;
+        --primary-soft: #dbe8ff;
+        --cta: #f59e0b;
+        --ok: #16a34a;
+        --warn: #b45309;
+        --bad: #dc2626;
+        --radius-lg: 18px;
+        --radius-md: 12px;
+        --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Fira Sans", "PingFang SC", sans-serif;
+        background:
+          radial-gradient(circle at 0% 0%, #e8f0ff 0%, rgba(232, 240, 255, 0) 42%),
+          radial-gradient(circle at 100% 100%, #fff1d9 0%, rgba(255, 241, 217, 0) 45%),
+          var(--bg);
+      }
+
+      .page {
+        max-width: 1320px;
+        margin: 22px auto 36px;
+        padding: 0 14px;
+      }
+
+      .hero {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        background: linear-gradient(118deg, #fdfefe 0%, #eff4ff 55%, #fff8eb 100%);
+        box-shadow: var(--shadow);
+        padding: 18px;
+        margin-bottom: 12px;
+      }
+
+      .hero-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-family: "Fira Code", monospace;
+        font-size: clamp(24px, 4vw, 34px);
+        line-height: 1.2;
+      }
+
+      .hero p {
+        margin: 8px 0 0;
+        color: var(--ink-soft);
+      }
+
+      .hero-chip {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid #bfccf0;
+        border-radius: 999px;
+        background: #fff;
+        color: #27418f;
+        font-family: "Fira Code", monospace;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 12px;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 0 0 12px;
+      }
+
+      .tab-btn {
+        border: 1px solid #cad5eb;
+        background: #fff;
+        color: #334155;
+        font-family: "Fira Code", monospace;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 10px 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .tab-btn.active {
+        color: #fff;
+        border-color: var(--primary);
+        background: linear-gradient(120deg, #1e40af 0%, #3b82f6 100%);
+      }
+
+      .panel {
+        display: none;
+      }
+
+      .panel.active {
+        display: block;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      @media (min-width: 980px) {
+        .metrics-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--bg-elev);
+        padding: 12px;
+      }
+
+      .metric .label {
+        display: block;
+        font-size: 12px;
+        color: var(--ink-soft);
+        margin-bottom: 8px;
+      }
+
+      .metric .value {
+        font-family: "Fira Code", monospace;
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .layout-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      @media (min-width: 1100px) {
+        .layout-grid {
+          grid-template-columns: 1.45fr 1fr;
+        }
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        background: var(--bg-elev);
+        box-shadow: var(--shadow);
+        padding: 14px;
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .card h2 {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 700;
+      }
+
+      .card p {
+        margin: 0 0 10px;
+        color: var(--ink-soft);
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      input[type="text"],
+      textarea,
+      input[type="number"],
+      select {
+        border: 1px solid #ced9e8;
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        font-family: "Fira Sans", sans-serif;
+        font-size: 14px;
+        padding: 10px 12px;
+      }
+
+      input[type="text"] {
+        flex: 1;
+        min-width: 220px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 76px;
+        resize: vertical;
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        color: #fff;
+        background: linear-gradient(120deg, var(--primary) 0%, #2452d2 100%);
+        font-family: "Fira Code", monospace;
+        font-weight: 600;
+        font-size: 13px;
+        padding: 10px 14px;
+        cursor: pointer;
+        transition: filter 0.2s ease;
+      }
+
+      button:hover {
+        filter: brightness(1.06);
+      }
+
+      button:disabled {
+        opacity: 0.66;
+        cursor: not-allowed;
+      }
+
+      .muted {
+        color: var(--ink-soft);
+        font-size: 13px;
+        min-height: 18px;
+        margin-top: 8px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 3px 10px;
+        border: 1px solid transparent;
+      }
+
+      .status.ok {
+        color: #166534;
+        background: #dcfce7;
+        border-color: #86efac;
+      }
+
+      .status.warn {
+        color: #9a3412;
+        background: #ffedd5;
+        border-color: #fdba74;
+      }
+
+      .status.bad {
+        color: #991b1b;
+        background: #fee2e2;
+        border-color: #fca5a5;
+      }
+
+      .badge-signal {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 3px 10px;
+        border: 1px solid transparent;
+      }
+
+      .badge-signal.green {
+        color: #166534;
+        background: #dcfce7;
+        border-color: #86efac;
+      }
+
+      .badge-signal.yellow {
+        color: #854d0e;
+        background: #fef9c3;
+        border-color: #fde047;
+      }
+
+      .badge-signal.red {
+        color: #991b1b;
+        background: #fee2e2;
+        border-color: #fca5a5;
+      }
+
+      .signal-note {
+        margin-left: 6px;
+        color: #64748b;
+        font-size: 12px;
+      }
+
+      .valuation-panel {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .valuation-panel h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .valuation-grid {
+        display: grid;
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      @media (min-width: 900px) {
+        .valuation-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .valuation-item {
+        border: 1px solid #d9e6ff;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .valuation-item .name {
+        font-weight: 600;
+        font-size: 13px;
+        margin-bottom: 6px;
+      }
+
+      .valuation-item .meta {
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .table-wrap {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        overflow: auto;
+        max-height: 430px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        padding: 9px 10px;
+        text-align: left;
+        border-bottom: 1px solid #edf2f8;
+        white-space: nowrap;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f4f8ff;
+        color: #1e3a8a;
+        font-family: "Fira Code", monospace;
+        font-size: 12px;
+      }
+
+      tbody tr:hover {
+        background: #f8fbff;
+      }
+
+      .num-up {
+        color: var(--ok);
+        font-weight: 600;
+      }
+
+      .num-down {
+        color: var(--bad);
+        font-weight: 600;
+      }
+
+      .inline-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--ink-soft);
+        font-size: 13px;
+      }
+
+      .right-rail {
+        display: grid;
+        gap: 12px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <h1>Investment Assistant Dashboard</h1>
+            <p>Single-stock diagnostics, watchlist snapshots, and macro indicator tracking in one workspace.</p>
+          </div>
+          <div class="hero-chip">A-share / Data-first / FastAPI</div>
+        </div>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="Dashboard tabs">
+        <button id="tabStockBtn" class="tab-btn active" data-tab="stockPanel" role="tab" aria-selected="true">Stock Analysis</button>
+        <button id="tabMacroBtn" class="tab-btn" data-tab="macroPanel" role="tab" aria-selected="false">Macro Indicators</button>
+      </div>
+
+      <section id="stockPanel" class="panel active" role="tabpanel">
+        <div class="metrics-grid" aria-live="polite">
+          <div class="metric">
+            <span class="label">Current Symbol</span>
+            <div id="metricSymbol" class="value">-</div>
+          </div>
+          <div class="metric">
+            <span class="label">Latest Close</span>
+            <div id="metricClose" class="value">-</div>
+          </div>
+          <div class="metric">
+            <span class="label">Daily Change</span>
+            <div id="metricChange" class="value">-</div>
+          </div>
+          <div class="metric">
+            <span class="label">Latest ROE / Debt</span>
+            <div id="metricQuality" class="value">-</div>
+          </div>
+        </div>
+
+        <div class="layout-grid">
+          <div>
+            <div class="card">
+              <h2>Single Stock Analyzer</h2>
+              <p>Input one 6-digit code and fetch historical prices plus annual financials.</p>
+              <div class="row">
+                <input id="stockCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Stock code" />
+                <button id="analyzeBtn">Run Analysis</button>
+              </div>
+              <div class="muted" id="singleStatus"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <h2>Price Data</h2>
+                <div class="row">
+                  <label class="inline-label" for="priceLimitSelect">Rows</label>
+                  <select id="priceLimitSelect">
+                    <option value="30">30</option>
+                    <option value="60" selected>60</option>
+                    <option value="120">120</option>
+                    <option value="all">All</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table id="priceTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Open</th>
+                      <th>Close</th>
+                      <th>High</th>
+                      <th>Low</th>
+                      <th>Volume</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="muted" id="priceMeta"></div>
+            </div>
+
+            <div class="card">
+              <h2>Financial Summary (5Y)</h2>
+              <div class="table-wrap">
+                <table id="financialTable">
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th>Report Date</th>
+                      <th>Revenue</th>
+                      <th>Net Profit</th>
+                      <th>ROE (%)</th>
+                      <th>Debt Ratio (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <aside class="right-rail">
+            <div class="card">
+              <h2>Watchlist Snapshot</h2>
+              <p>Paste multiple symbols separated by comma, whitespace, or newline.</p>
+              <textarea id="watchlistCodes" placeholder="000333, 600519, 601318"></textarea>
+              <div class="row">
+                <button id="analyzeWatchlistBtn">Analyze Watchlist</button>
+              </div>
+              <div class="muted" id="watchlistStatus"></div>
+              <div class="table-wrap">
+                <table id="watchlistTable">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Latest Date</th>
+                      <th>Close</th>
+                      <th>Revenue</th>
+                      <th>Net Profit</th>
+                      <th>ROE</th>
+                      <th>Debt Ratio</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="macroPanel" class="panel" role="tabpanel">
+        <div class="card">
+          <h2>Macro Indicators (SQLite)</h2>
+          <p>Switch data table, tune row limit, and optionally forward-fill missing points in the current view.</p>
+          <div class="row">
+            <select id="macroTableSelect" aria-label="Macro table">
+              <option value="macro_indicators" selected>Production Macro (macro_indicators)</option>
+              <option value="macro_indicators_step2">Full Macro (10 indicators)</option>
+              <option value="macro_indicators_step1">Core Macro (5 indicators)</option>
+            </select>
+            <input id="macroLimitInput" type="number" min="1" max="500" value="30" aria-label="Row limit" />
+            <label class="inline-label">
+              <input id="macroFillMissing" type="checkbox" />
+              Fill missing values
+            </label>
+            <button id="loadMacroBtn">Load Macro</button>
+          </div>
+          <div class="muted" id="macroStatus"></div>
+          <div class="muted" id="macroHint"></div>
+          <div class="valuation-panel">
+            <h3>Equity Market Valuation Panel</h3>
+            <div id="valuationPanel" class="valuation-grid"></div>
+          </div>
+          <div class="table-wrap" style="margin-bottom: 10px">
+            <table id="macroSignalTable">
+              <thead>
+                <tr>
+                  <th>Indicator</th>
+                  <th>Value</th>
+                  <th>Percentile</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="table-wrap">
+            <table id="macroTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const apiBase =
+        window.location.protocol === "http:" || window.location.protocol === "https:"
+          ? window.location.origin
+          : "http://127.0.0.1:8000";
+
+      const tabStockBtn = document.getElementById("tabStockBtn");
+      const tabMacroBtn = document.getElementById("tabMacroBtn");
+      const stockPanel = document.getElementById("stockPanel");
+      const macroPanel = document.getElementById("macroPanel");
+
+      const analyzeBtn = document.getElementById("analyzeBtn");
+      const stockCodeInput = document.getElementById("stockCode");
+      const singleStatusEl = document.getElementById("singleStatus");
+
+      const metricSymbol = document.getElementById("metricSymbol");
+      const metricClose = document.getElementById("metricClose");
+      const metricChange = document.getElementById("metricChange");
+      const metricQuality = document.getElementById("metricQuality");
+
+      const priceLimitSelect = document.getElementById("priceLimitSelect");
+      const priceTableBody = document.querySelector("#priceTable tbody");
+      const priceMetaEl = document.getElementById("priceMeta");
+      const financialTableBody = document.querySelector("#financialTable tbody");
+
+      const watchlistCodes = document.getElementById("watchlistCodes");
+      const analyzeWatchlistBtn = document.getElementById("analyzeWatchlistBtn");
+      const watchlistStatusEl = document.getElementById("watchlistStatus");
+      const watchlistTableBody = document.querySelector("#watchlistTable tbody");
+
+      const macroTableSelect = document.getElementById("macroTableSelect");
+      const macroLimitInput = document.getElementById("macroLimitInput");
+      const macroFillMissing = document.getElementById("macroFillMissing");
+      const loadMacroBtn = document.getElementById("loadMacroBtn");
+      const macroStatusEl = document.getElementById("macroStatus");
+      const macroHintEl = document.getElementById("macroHint");
+      const valuationPanelEl = document.getElementById("valuationPanel");
+      const macroSignalTableBody = document.querySelector("#macroSignalTable tbody");
+      const macroTableHead = document.querySelector("#macroTable thead");
+      const macroTableBody = document.querySelector("#macroTable tbody");
+
+      let currentPriceRows = [];
+      let currentFinancialRows = [];
+      let lastMacroRows = [];
+      let macroLoadedOnce = false;
+      const macroTableLabelMap = {
+        macro_indicators: "Production Macro (macro_indicators)",
+        macro_indicators_step1: "Core Macro (5 indicators)",
+        macro_indicators_step2: "Full Macro (10 indicators)",
+      };
+      const valuationIndicatorConfig = [
+        { key: "shanghai_composite_pe", label: "Shanghai Composite PE" },
+        { key: "csi300_pe", label: "CSI 300 PE" },
+        { key: "chinext_pe", label: "ChiNext PE" },
+        { key: "star_market_pe", label: "STAR Market PE" },
+        { key: "hang_seng_pe", label: "Hang Seng Index PE" },
+        { key: "hang_seng_tech_pe", label: "Hang Seng Tech Index PE" },
+      ];
+
+      function switchTab(targetId) {
+        const isStock = targetId === "stockPanel";
+        tabStockBtn.classList.toggle("active", isStock);
+        tabMacroBtn.classList.toggle("active", !isStock);
+        tabStockBtn.setAttribute("aria-selected", String(isStock));
+        tabMacroBtn.setAttribute("aria-selected", String(!isStock));
+        stockPanel.classList.toggle("active", isStock);
+        macroPanel.classList.toggle("active", !isStock);
+
+        if (!isStock && !macroLoadedOnce) {
+          loadMacroIndicators();
+          macroLoadedOnce = true;
+        }
+      }
+
+      tabStockBtn.addEventListener("click", () => switchTab("stockPanel"));
+      tabMacroBtn.addEventListener("click", () => switchTab("macroPanel"));
+
+      function formatNumber(value, digits = 2) {
+        if (value === null || value === undefined || value === "") return "-";
+        const n = Number(value);
+        if (Number.isNaN(n)) return "-";
+        return n.toLocaleString(undefined, { maximumFractionDigits: digits });
+      }
+
+      function resetMetrics() {
+        metricSymbol.textContent = "-";
+        metricClose.textContent = "-";
+        metricChange.textContent = "-";
+        metricChange.className = "value";
+        metricQuality.textContent = "-";
+      }
+
+      function updateMetrics(symbol, priceRows, financialRows) {
+        metricSymbol.textContent = symbol || "-";
+
+        const latest = priceRows[0];
+        const prev = priceRows[1];
+        if (latest && latest.close !== null && latest.close !== undefined) {
+          metricClose.textContent = formatNumber(latest.close);
+        } else {
+          metricClose.textContent = "-";
+        }
+
+        if (latest && prev && latest.close != null && prev.close != null && Number(prev.close) !== 0) {
+          const delta = Number(latest.close) - Number(prev.close);
+          const pct = (delta / Number(prev.close)) * 100;
+          metricChange.textContent = `${delta >= 0 ? "+" : ""}${formatNumber(delta)} (${pct >= 0 ? "+" : ""}${formatNumber(pct)}%)`;
+          metricChange.className = `value ${delta >= 0 ? "num-up" : "num-down"}`;
+        } else {
+          metricChange.textContent = "-";
+          metricChange.className = "value";
+        }
+
+        const latestFinancial = financialRows[0];
+        if (latestFinancial) {
+          metricQuality.textContent = `ROE ${formatNumber(latestFinancial.roe)}% / Debt ${formatNumber(latestFinancial.debt_ratio)}%`;
+        } else {
+          metricQuality.textContent = "-";
+        }
+      }
+
+      function renderPriceRows(rows) {
+        const limit = priceLimitSelect.value;
+        const renderRows = limit === "all" ? rows : rows.slice(0, Number(limit));
+        priceTableBody.innerHTML = "";
+
+        renderRows.forEach((row, index) => {
+          const previous = renderRows[index + 1];
+          const upDownClass =
+            previous && row.close != null && previous.close != null
+              ? Number(row.close) >= Number(previous.close)
+                ? "num-up"
+                : "num-down"
+              : "";
+
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.trade_date ?? "-"}</td>
+            <td>${formatNumber(row.open)}</td>
+            <td class="${upDownClass}">${formatNumber(row.close)}</td>
+            <td>${formatNumber(row.high)}</td>
+            <td>${formatNumber(row.low)}</td>
+            <td>${formatNumber(row.volume)}</td>
+            <td>${formatNumber(row.amount)}</td>
+          `;
+          priceTableBody.appendChild(tr);
+        });
+
+        priceMetaEl.textContent = `Showing ${renderRows.length} / ${rows.length} rows.`;
+      }
+
+      function renderFinancialRows(rows) {
+        financialTableBody.innerHTML = "";
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.report_year ?? "-"}</td>
+            <td>${row.report_date ?? "-"}</td>
+            <td>${formatNumber(row.revenue)}</td>
+            <td>${formatNumber(row.net_profit)}</td>
+            <td>${formatNumber(row.roe)}</td>
+            <td>${formatNumber(row.debt_ratio)}</td>
+          `;
+          financialTableBody.appendChild(tr);
+        });
+      }
+
+      async function analyzeSingleStock() {
+        const code = stockCodeInput.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          singleStatusEl.textContent = "Please input a valid 6-digit stock code.";
+          return;
+        }
+
+        analyzeBtn.disabled = true;
+        singleStatusEl.textContent = "Analyzing and updating dashboard...";
+
+        try {
+          const res = await fetch(`${apiBase}/api/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stock_code: code }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          currentPriceRows = data.price_data || [];
+          currentFinancialRows = data.financial_summary || [];
+          renderPriceRows(currentPriceRows);
+          renderFinancialRows(currentFinancialRows);
+          updateMetrics(data.symbol, currentPriceRows, currentFinancialRows);
+
+          const warningText = (data.warnings || []).length
+            ? ` Warnings: ${(data.warnings || []).join(" | ")}`
+            : "";
+          singleStatusEl.textContent = `Loaded ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
+        } catch (err) {
+          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+            singleStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            singleStatusEl.textContent = `Error: ${err.message}`;
+          }
+          currentPriceRows = [];
+          currentFinancialRows = [];
+          priceTableBody.innerHTML = "";
+          financialTableBody.innerHTML = "";
+          priceMetaEl.textContent = "";
+          resetMetrics();
+        } finally {
+          analyzeBtn.disabled = false;
+        }
+      }
+
+      function parseWatchlistInput(text) {
+        const raw = text
+          .split(/[\n,，\s]+/g)
+          .map((x) => x.trim())
+          .filter(Boolean);
+
+        const uniq = [];
+        raw.forEach((code) => {
+          if (!uniq.includes(code)) uniq.push(code);
+        });
+        return uniq;
+      }
+
+      function watchlistStatusBadge(item) {
+        if (item.error) {
+          return `<span class="status bad">Error</span>`;
+        }
+        if ((item.warnings || []).length) {
+          return `<span class="status warn">Warning</span>`;
+        }
+        return `<span class="status ok">OK</span>`;
+      }
+
+      function renderWatchlistRows(rows) {
+        watchlistTableBody.innerHTML = "";
+        rows.forEach((item) => {
+          const p = item.latest_price || {};
+          const f = item.latest_financial || {};
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.symbol ?? "-"}</td>
+            <td>${p.trade_date ?? "-"}</td>
+            <td>${formatNumber(p.close)}</td>
+            <td>${formatNumber(f.revenue)}</td>
+            <td>${formatNumber(f.net_profit)}</td>
+            <td>${formatNumber(f.roe)}</td>
+            <td>${formatNumber(f.debt_ratio)}</td>
+            <td>${watchlistStatusBadge(item)}</td>
+          `;
+          watchlistTableBody.appendChild(tr);
+        });
+      }
+
+      async function analyzeWatchlist() {
+        const codes = parseWatchlistInput(watchlistCodes.value);
+        if (!codes.length) {
+          watchlistStatusEl.textContent = "Please input at least one stock code.";
+          return;
+        }
+
+        analyzeWatchlistBtn.disabled = true;
+        watchlistStatusEl.textContent = `Analyzing ${codes.length} symbols...`;
+
+        try {
+          const res = await fetch(`${apiBase}/api/analyze-multi`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stock_codes: codes }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          const rows = data.results || [];
+          renderWatchlistRows(rows);
+          const okCount = rows.filter((x) => !x.error).length;
+          watchlistStatusEl.textContent = `Loaded watchlist. ${okCount}/${rows.length} symbols succeeded.`;
+        } catch (err) {
+          watchlistTableBody.innerHTML = "";
+          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+            watchlistStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            watchlistStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          analyzeWatchlistBtn.disabled = false;
+        }
+      }
+
+      function clearMacroTable() {
+        macroTableHead.innerHTML = "";
+        macroTableBody.innerHTML = "";
+      }
+
+      function clearMacroSignals() {
+        macroSignalTableBody.innerHTML = "";
+      }
+
+      function renderMacroSignals(rows) {
+        clearMacroSignals();
+        rows.forEach((row) => {
+          const extraNote =
+            row.indicator === "china_pmi"
+              ? `<span class="signal-note" title="china_pmi uses fixed threshold rule: >=50 Expansion, <50 Contraction">Threshold: 50</span>`
+              : "";
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.indicator ?? "-"}</td>
+            <td>${formatNumber(row.value)}</td>
+            <td>${row.percentile ?? "-"}%</td>
+            <td><span class="badge-signal ${row.signal_color || "yellow"}">${row.signal_label || "-"}</span>${extraNote}</td>
+          `;
+          macroSignalTableBody.appendChild(tr);
+        });
+      }
+
+      function renderValuationPanel(rows) {
+        valuationPanelEl.innerHTML = "";
+        const signalMap = {};
+        rows.forEach((row) => {
+          signalMap[row.indicator] = row;
+        });
+
+        valuationIndicatorConfig.forEach((item) => {
+          const signal = signalMap[item.key];
+          const card = document.createElement("div");
+          card.className = "valuation-item";
+
+          if (!signal) {
+            card.innerHTML = `
+              <div class="name">${item.label}</div>
+              <div class="meta">Value: - | Percentile: -</div>
+              <div class="meta"><span class="badge-signal yellow">No Data</span></div>
+            `;
+            valuationPanelEl.appendChild(card);
+            return;
+          }
+
+          card.innerHTML = `
+            <div class="name">${item.label}</div>
+            <div class="meta">Value: ${formatNumber(signal.value)} | Percentile: ${signal.percentile}%</div>
+            <div class="meta"><span class="badge-signal ${signal.signal_color || "yellow"}">${signal.signal_label || "-"}</span></div>
+          `;
+          valuationPanelEl.appendChild(card);
+        });
+      }
+
+      function fillMissingValues(rows) {
+        if (!rows.length) return [];
+        const asc = [...rows].reverse();
+        const keys = Object.keys(asc[0]).filter((k) => k !== "date");
+        const last = {};
+
+        const outAsc = asc.map((row) => {
+          const cloned = { ...row };
+          keys.forEach((k) => {
+            if (cloned[k] === null || cloned[k] === undefined || cloned[k] === "") {
+              if (last[k] !== undefined) cloned[k] = last[k];
+            } else {
+              last[k] = cloned[k];
+            }
+          });
+          return cloned;
+        });
+
+        return outAsc.reverse();
+      }
+
+      function buildMissingHint(rows) {
+        if (!rows.length) return "No data loaded.";
+        const keys = Object.keys(rows[0]).filter((k) => k !== "date");
+        const parts = keys.map((k) => {
+          let nn = 0;
+          rows.forEach((r) => {
+            if (r[k] !== null && r[k] !== undefined && r[k] !== "") nn += 1;
+          });
+          return `${k}: ${nn}/${rows.length}`;
+        });
+        return `Non-null counts in current view: ${parts.join(" | ")}`;
+      }
+
+      function renderMacroRows(rows) {
+        clearMacroTable();
+        if (!rows.length) {
+          macroHintEl.textContent = "No rows found in selected table/limit.";
+          return;
+        }
+
+        const keys = Object.keys(rows[0]).sort((a, b) => {
+          if (a === "date") return -1;
+          if (b === "date") return 1;
+          return 0;
+        });
+
+        const headTr = document.createElement("tr");
+        keys.forEach((k) => {
+          const th = document.createElement("th");
+          th.textContent = k;
+          headTr.appendChild(th);
+        });
+        macroTableHead.appendChild(headTr);
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          keys.forEach((k) => {
+            const td = document.createElement("td");
+            td.textContent = k === "date" ? row[k] ?? "-" : formatNumber(row[k]);
+            tr.appendChild(td);
+          });
+          macroTableBody.appendChild(tr);
+        });
+
+        macroHintEl.textContent = buildMissingHint(rows);
+      }
+
+      async function loadMacroIndicators() {
+        const table = macroTableSelect.value;
+        const limit = Math.max(1, Math.min(500, Number(macroLimitInput.value || 30)));
+        macroLimitInput.value = String(limit);
+
+        loadMacroBtn.disabled = true;
+        macroStatusEl.textContent = "Loading macro indicators...";
+        macroHintEl.textContent = "";
+        clearMacroTable();
+
+        try {
+          const rowsUrl = `${apiBase}/api/macro-indicators?table=${encodeURIComponent(table)}&limit=${limit}`;
+          const signalsUrl = `${apiBase}/macro_signals?table=${encodeURIComponent(table)}`;
+
+          const [res, signalRes] = await Promise.all([fetch(rowsUrl), fetch(signalsUrl)]);
+          const data = await res.json();
+          const signalData = await signalRes.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+          if (!signalRes.ok) throw new Error(signalData.detail || "Signal request failed");
+
+          lastMacroRows = data.rows || [];
+          const viewRows = macroFillMissing.checked ? fillMissingValues(lastMacroRows) : lastMacroRows;
+          renderMacroRows(viewRows);
+          renderMacroSignals(signalData || []);
+          renderValuationPanel(signalData || []);
+          const displayName = macroTableLabelMap[table] || table;
+          macroStatusEl.textContent = `Loaded ${displayName}. Rows: ${viewRows.length}. Limit: ${limit}.`;
+        } catch (err) {
+          lastMacroRows = [];
+          clearMacroTable();
+          clearMacroSignals();
+          valuationPanelEl.innerHTML = "";
+          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+            macroStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}. Table cleared (not refreshed).`;
+          } else {
+            macroStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          loadMacroBtn.disabled = false;
+        }
+      }
+
+      analyzeBtn.addEventListener("click", analyzeSingleStock);
+      stockCodeInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") analyzeSingleStock();
+      });
+      priceLimitSelect.addEventListener("change", () => renderPriceRows(currentPriceRows));
+
+      analyzeWatchlistBtn.addEventListener("click", analyzeWatchlist);
+
+      loadMacroBtn.addEventListener("click", loadMacroIndicators);
+      macroTableSelect.addEventListener("change", loadMacroIndicators);
+      macroLimitInput.addEventListener("change", loadMacroIndicators);
+      macroFillMissing.addEventListener("change", () => {
+        const rows = macroFillMissing.checked ? fillMissingValues(lastMacroRows) : lastMacroRows;
+        renderMacroRows(rows);
+      });
+
+      resetMetrics();
+      loadMacroIndicators();
+      macroLoadedOnce = true;
+    </script>
+  </body>
+</html>
