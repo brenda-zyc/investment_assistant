@@ -587,6 +587,7 @@
                       <th>Symbol</th>
                       <th>Latest Date</th>
                       <th>Close</th>
+                      <th>Close Pctl</th>
                       <th>Revenue</th>
                       <th>Net Profit</th>
                       <th>ROE</th>
@@ -938,11 +939,16 @@
         rows.forEach((item) => {
           const p = item.latest_price || {};
           const f = item.latest_financial || {};
+          const closePercentileText =
+            item.close_percentile === null || item.close_percentile === undefined
+              ? "-"
+              : `${item.close_percentile}%`;
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td>${item.symbol ?? "-"}</td>
             <td>${p.trade_date ?? "-"}</td>
             <td>${formatNumber(p.close)}</td>
+            <td>${closePercentileText}</td>
             <td>${formatNumber(f.revenue)}</td>
             <td>${formatNumber(f.net_profit)}</td>
             <td>${formatNumber(f.roe)}</td>

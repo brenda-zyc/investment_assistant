@@ -41,6 +41,29 @@ class MultiAnalyzeRequest(BaseModel):
     stock_codes: list[str]
 
 
+def _compute_latest_close_percentile(price_rows: list[dict]) -> int | None:
+    """Compute percentile of latest close within stored close history."""
+    if not price_rows:
+        return None
+
+    closes: list[float] = []
+    latest_close: float | None = None
+    for row in price_rows:
+        value = _to_float(row.get("close"))
+        if value is None:
+            continue
+        closes.append(value)
+        if latest_close is None:
+            latest_close = value
+
+    if latest_close is None or len(closes) < 2:
+        return None
+
+    rank_le = sum(1 for value in closes if value <= latest_close)
+    percentile = int(round((rank_le / len(closes)) * 100))
+    return max(0, min(100, percentile))
+
+
 def _compute_percentile_from_points(points: list[tuple[str, float]], min_samples: int = 24) -> dict:
     """Compute latest-value percentile within a metric's historical series."""
     # Data cleaning rule: ignore null values before percentile ranking.
@@ -288,11 +311,13 @@ def analyze_multi(payload: MultiAnalyzeRequest) -> dict:
             latest_financial = (
                 analyzed["financial_summary"][0] if analyzed["financial_summary"] else None
             )
+            close_percentile = _compute_latest_close_percentile(analyzed["price_data"])
             results.append(
                 {
                     "symbol": symbol,
                     "latest_price": latest_price,
                     "latest_financial": latest_financial,
+                    "close_percentile": close_percentile,
                     "warnings": analyzed["warnings"],
                 }
             )
