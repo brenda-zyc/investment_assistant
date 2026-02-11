@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime as dt
 from typing import Literal
 import logging
 
@@ -10,18 +11,34 @@ from starlette.requests import Request
 
 from app.data_service import (
     build_revenue_cagr_5y_series,
+    extract_financial_row_from_report_text,
     fetch_financial_metric_series,
+    fetch_report_text_from_url,
     fetch_financial_summary,
     fetch_price_data,
+    fetch_realtime_quotes,
+    fetch_stock_names,
     fetch_valuation_series,
     normalize_stock_code,
 )
+from app.industry_service import fetch_industry_price_rows, get_industry_indicator_specs
+from app.core_logic import (
+    compute_financial_report_analysis,
+    compute_latest_close_percentile,
+    compute_macro_signals,
+    compute_percentile_from_points,
+    compute_stock_metrics,
+    signal_from_percentile,
+    to_float,
+)
 from app.db import (
+    fetch_industry_prices,
     fetch_macro_indicators_all,
     fetch_macro_indicators,
     fetch_financial_reports,
     fetch_stock_prices,
     init_db,
+    upsert_industry_prices,
     upsert_financial_reports,
     upsert_stock_prices,
 )
@@ -41,185 +58,204 @@ class MultiAnalyzeRequest(BaseModel):
     stock_codes: list[str]
 
 
+class FinancialReportUrlRequest(BaseModel):
+    url: str
+
+
+def _parse_symbols_input(symbols_text: str) -> list[str]:
+    """Parse comma-separated symbols and return normalized unique 6-digit codes."""
+    raw_parts = [part.strip() for part in symbols_text.split(",") if part.strip()]
+    unique_symbols: list[str] = []
+    for part in raw_parts:
+        normalized = normalize_stock_code(part)
+        if normalized not in unique_symbols:
+            unique_symbols.append(normalized)
+    return unique_symbols
+
+
 def _compute_latest_close_percentile(price_rows: list[dict]) -> int | None:
     """Compute percentile of latest close within stored close history."""
-    if not price_rows:
-        return None
-
-    closes: list[float] = []
-    latest_close: float | None = None
-    for row in price_rows:
-        value = _to_float(row.get("close"))
-        if value is None:
-            continue
-        closes.append(value)
-        if latest_close is None:
-            latest_close = value
-
-    if latest_close is None or len(closes) < 2:
-        return None
-
-    rank_le = sum(1 for value in closes if value <= latest_close)
-    percentile = int(round((rank_le / len(closes)) * 100))
-    return max(0, min(100, percentile))
-
+    return compute_latest_close_percentile(price_rows)
 
 def _compute_percentile_from_points(points: list[tuple[str, float]], min_samples: int = 24) -> dict:
     """Compute latest-value percentile within a metric's historical series."""
-    # Data cleaning rule: ignore null values before percentile ranking.
-    cleaned = [(d, v) for d, v in points if v is not None]
-    if not cleaned:
-        return {"value": None, "percentile": None, "as_of": None, "data_insufficient": True, "sample_size": 0}
-
-    latest_date, latest_value = cleaned[-1]
-    series_values = [v for _, v in cleaned]
-    sample_size = len(series_values)
-    if sample_size < min_samples:
-        return {
-            "value": latest_value,
-            "percentile": None,
-            "as_of": latest_date,
-            "data_insufficient": True,
-            "sample_size": sample_size,
-        }
-
-    # Percentile logic: rank latest observation in its own historical distribution.
-    rank_le = sum(1 for value in series_values if value <= latest_value)
-    percentile = int(round((rank_le / sample_size) * 100))
-    percentile = max(0, min(100, percentile))
-    return {
-        "value": latest_value,
-        "percentile": percentile,
-        "as_of": latest_date,
-        "data_insufficient": False,
-        "sample_size": sample_size,
-    }
-
+    return compute_percentile_from_points(points, min_samples=min_samples)
 
 def _compute_stock_metrics(symbol: str) -> dict:
     """Build stock metric payload with value/percentile and sampling metadata."""
-    # API assumption: upstream AkShare endpoints can fail independently.
+
+    def _warn(kind: str, stock_symbol: str, exc: Exception) -> None:
+        """Bridge core warnings into structured logger output."""
+        logger.warning("stock_metrics %s fetch failed symbol=%s err=%s", kind, stock_symbol, exc)
+
+    payload = compute_stock_metrics(
+        symbol=symbol,
+        fetch_valuation_series_fn=fetch_valuation_series,
+        fetch_financial_metric_series_fn=fetch_financial_metric_series,
+        build_revenue_cagr_5y_series_fn=build_revenue_cagr_5y_series,
+        warn_fn=_warn,
+    )
+    for metric in payload["metrics"]:
+        logger.info(
+            "stock_metrics metric=%s symbol=%s sample_size=%d",
+            metric["name"],
+            symbol,
+            metric["sample_size"],
+        )
+    return payload
+
+def _to_float(value: object) -> float | None:
+    """Convert raw value into float when possible."""
+    return to_float(value)
+
+def _signal_from_percentile(percentile: int) -> tuple[str, str]:
+    """Map percentile to valuation-style signal label and color."""
+    return signal_from_percentile(percentile)
+
+def _compute_macro_signals(rows: list[dict]) -> list[dict]:
+    """Compute percentile-based macro signals using full available history."""
+    return compute_macro_signals(rows)
+
+
+def _parse_iso_date(value: object) -> dt.date | None:
+    """Parse ISO-like date text to date object and return None on invalid input."""
+    if value is None:
+        return None
     try:
-        valuation_series = fetch_valuation_series(symbol)
-    except Exception as exc:
-        logger.warning("stock_metrics valuation fetch failed symbol=%s err=%s", symbol, exc)
-        valuation_series = {"pe_ttm": [], "pb": []}
+        return dt.date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
-    try:
-        fin_series = fetch_financial_metric_series(symbol)
-    except Exception as exc:
-        logger.warning("stock_metrics financial fetch failed symbol=%s err=%s", symbol, exc)
-        fin_series = {"roe": [], "roic": [], "revenue": []}
 
-    # Financial logic: CAGR is derived from revenue history, not fetched directly.
-    revenue_cagr_series = build_revenue_cagr_5y_series(fin_series.get("revenue", []))
+def _compute_window_percentile(
+    points: list[tuple[dt.date, float]],
+    latest_date: dt.date,
+    latest_value: float,
+    window_days: int,
+) -> tuple[int | None, int]:
+    """Compute percentile of latest value inside a lookback window."""
+    window_start = latest_date - dt.timedelta(days=window_days)
+    window_values = [value for date_value, value in points if date_value >= window_start]
+    if not window_values:
+        return None, 0
+    # Percentile logic: rank latest observation versus values in the same window.
+    rank_le = sum(1 for value in window_values if value <= latest_value)
+    percentile = int(round((rank_le / len(window_values)) * 100))
+    return max(0, min(100, percentile)), len(window_values)
 
-    metric_sources = {
-        "pe_ttm": valuation_series.get("pe_ttm", []),
-        "pb": valuation_series.get("pb", []),
-        "roe": fin_series.get("roe", []),
-        "roic": fin_series.get("roic", []),
-        "revenue_cagr_5y": revenue_cagr_series,
-    }
-    metric_units = {
-        "pe_ttm": "",
-        "pb": "",
-        "roe": "ratio",
-        "roic": "ratio",
-        "revenue_cagr_5y": "ratio",
-    }
 
-    metrics_payload: list[dict] = []
-    as_of_dates: list[str] = []
-    for metric_name, points in metric_sources.items():
-        logger.info("stock_metrics metric=%s symbol=%s points=%d", metric_name, symbol, len(points))
-        computed = _compute_percentile_from_points(points, min_samples=24)
-        if computed["as_of"]:
-            as_of_dates.append(computed["as_of"])
-        metrics_payload.append(
+def _build_industry_cycles_payload(rows: list[dict]) -> dict:
+    """Build current value plus 1Y/5Y percentile payload for industry indicators."""
+    grouped_points: dict[str, list[tuple[dt.date, float]]] = {}
+    grouped_meta: dict[str, dict[str, str]] = {}
+
+    for row in rows:
+        indicator_key = str(row.get("indicator") or "").strip()
+        if not indicator_key:
+            continue
+        trade_date = _parse_iso_date(row.get("trade_date"))
+        value = _to_float(row.get("value"))
+        # Data cleaning rule: ignore malformed date/value rows before percentile calculations.
+        if trade_date is None or value is None:
+            continue
+        grouped_points.setdefault(indicator_key, []).append((trade_date, value))
+        grouped_meta[indicator_key] = {
+            "industry": str(row.get("industry") or ""),
+            "source": str(row.get("source") or ""),
+        }
+
+    for key in grouped_points:
+        grouped_points[key].sort(key=lambda item: item[0])
+
+    output_rows: list[dict] = []
+    grouped_output_rows: dict[str, list[dict]] = {}
+    as_of_candidates: list[str] = []
+    for spec in get_industry_indicator_specs():
+        indicator_key = spec["indicator_key"]
+        points = grouped_points.get(indicator_key, [])
+        if not points:
+            row_payload = (
+                {
+                    "industry": spec["industry"],
+                    "indicator": spec["indicator"],
+                    "value": None,
+                    "1y_percentile": None,
+                    "5y_percentile": None,
+                    "as_of": None,
+                    "source": None,
+                }
+            )
+            output_rows.append(row_payload)
+            grouped_output_rows.setdefault(spec["industry"], []).append(row_payload)
+            continue
+
+        latest_date, latest_value = points[-1]
+        p1y, _ = _compute_window_percentile(points, latest_date, latest_value, window_days=365)
+        p5y, _ = _compute_window_percentile(points, latest_date, latest_value, window_days=365 * 5)
+        as_of_text = latest_date.isoformat()
+        as_of_candidates.append(as_of_text)
+        row_payload = (
             {
-                "name": metric_name,
-                "value": computed["value"],
-                "percentile": computed["percentile"],
-                "unit": metric_units[metric_name],
-                "data_insufficient": computed["data_insufficient"],
-                "sample_size": computed["sample_size"],
+                "industry": spec["industry"],
+                "indicator": spec["indicator"],
+                "value": latest_value,
+                "1y_percentile": p1y,
+                "5y_percentile": p5y,
+                "as_of": as_of_text,
+                "source": grouped_meta.get(indicator_key, {}).get("source") or None,
+            }
+        )
+        output_rows.append(row_payload)
+        grouped_output_rows.setdefault(spec["industry"], []).append(row_payload)
+
+    industry_groups: list[dict] = []
+    seen_industries: set[str] = set()
+    for spec in get_industry_indicator_specs():
+        industry = spec["industry"]
+        if industry in seen_industries:
+            continue
+        seen_industries.add(industry)
+        industry_groups.append(
+            {
+                "industry": industry,
+                "rows": grouped_output_rows.get(industry, []),
             }
         )
 
     return {
-        "symbol": symbol,
-        "as_of": max(as_of_dates) if as_of_dates else None,
-        "metrics": metrics_payload,
+        "as_of": max(as_of_candidates) if as_of_candidates else None,
+        "rows": output_rows,
+        "groups": industry_groups,
     }
 
 
-def _to_float(value: object) -> float | None:
-    """Convert raw value into float when possible."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+def _suggest_industry_refresh_start(rows: list[dict]) -> str:
+    """Suggest bounded incremental refresh start date to keep API latency predictable."""
+    parsed_dates = [_parse_iso_date(row.get("trade_date")) for row in rows]
+    valid_dates = [date_value for date_value in parsed_dates if date_value is not None]
+    if not valid_dates:
+        return (dt.date.today() - dt.timedelta(days=120)).strftime("%Y%m%d")
+    # API assumption: backfill overlap avoids gaps when upstream sources revise recent points.
+    return (max(valid_dates) - dt.timedelta(days=30)).strftime("%Y%m%d")
 
 
-def _signal_from_percentile(percentile: int) -> tuple[str, str]:
-    """Map percentile to valuation-style signal label and color."""
-    if percentile < 20:
-        return ("Undervalued", "green")
-    if percentile <= 60:
-        return ("Neutral", "yellow")
-    return ("Expensive", "red")
-
-
-def _compute_macro_signals(rows: list[dict]) -> list[dict]:
-    """Compute percentile-based macro signals using full available history."""
-    if not rows:
-        return []
-
-    indicators = [key for key in rows[0].keys() if key != "date"]
-    signals: list[dict] = []
-
-    for indicator in indicators:
-        latest_value: float | None = None
-        series: list[float] = []
-
-        for row in rows:
-            value = _to_float(row.get(indicator))
-            if value is not None:
-                series.append(value)
-                if latest_value is None:
-                    latest_value = value
-
-        if latest_value is None or not series:
+def _industry_history_is_sparse(rows: list[dict], min_points_per_indicator: int = 12) -> bool:
+    """Return True when one or more indicators have too few cached points."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        indicator = str(row.get("indicator") or "").strip()
+        if not indicator:
             continue
+        value = _to_float(row.get("value"))
+        if value is None:
+            continue
+        counts[indicator] = counts.get(indicator, 0) + 1
 
-        # Percentile logic: compare latest value against the metric's own history.
-        less_or_equal_count = sum(1 for value in series if value <= latest_value)
-        percentile = int(round((less_or_equal_count / len(series)) * 100))
-        percentile = max(0, min(100, percentile))
-        # Financial rule override: PMI uses an economic threshold, not valuation buckets.
-        if indicator == "china_pmi":
-            if latest_value >= 50:
-                signal_label, signal_color = ("Expansion", "green")
-            else:
-                signal_label, signal_color = ("Contraction", "red")
-        else:
-            signal_label, signal_color = _signal_from_percentile(percentile)
-
-        signals.append(
-            {
-                "indicator": indicator,
-                "value": latest_value,
-                "percentile": percentile,
-                "signal_label": signal_label,
-                "signal_color": signal_color,
-            }
-        )
-
-    return sorted(signals, key=lambda item: item["indicator"])
-
+    for spec in get_industry_indicator_specs():
+        indicator_key = spec["indicator_key"]
+        if counts.get(indicator_key, 0) < min_points_per_indicator:
+            return True
+    return False
 
 @app.on_event("startup")
 def on_startup() -> None:
@@ -263,8 +299,24 @@ def _analyze_symbol(symbol: str) -> dict:
             )
             stored_financials = []
 
+    symbol_name: str | None = None
+    try:
+        symbol_name = fetch_stock_names([symbol]).get(symbol) or None
+    except Exception as exc:
+        warnings.append(f"Stock name fetch failed. Reason: {exc}")
+
+    # API assumption: realtime feed can fail independently from historical data pipeline.
+    try:
+        realtime_quote = fetch_realtime_quotes([symbol]).get(symbol, {})
+    except Exception as exc:
+        warnings.append(f"Realtime quote fetch failed; using historical latest close. Reason: {exc}")
+        realtime_quote = {}
+    if realtime_quote.get("name"):
+        symbol_name = realtime_quote["name"]
     return {
         "symbol": symbol,
+        "symbol_name": symbol_name,
+        "realtime": realtime_quote if realtime_quote else None,
         "price_data": stored_prices,
         "financial_summary": stored_financials,
         "warnings": warnings,
@@ -298,6 +350,7 @@ def analyze_multi(payload: MultiAnalyzeRequest) -> dict:
             unique_codes.append(code)
 
     results: list[dict] = []
+    successful_symbols: list[str] = []
     for raw_code in unique_codes[:20]:
         try:
             symbol = normalize_stock_code(raw_code)
@@ -315,14 +368,59 @@ def analyze_multi(payload: MultiAnalyzeRequest) -> dict:
             results.append(
                 {
                     "symbol": symbol,
+                    "symbol_name": None,
                     "latest_price": latest_price,
                     "latest_financial": latest_financial,
                     "close_percentile": close_percentile,
+                    "realtime": None,
                     "warnings": analyzed["warnings"],
                 }
             )
+            successful_symbols.append(symbol)
         except RuntimeError as exc:
             results.append({"symbol": symbol, "error": str(exc)})
+
+    try:
+        name_map = fetch_stock_names(successful_symbols)
+    except Exception as exc:
+        name_map = {}
+        for item in results:
+            if item.get("error"):
+                continue
+            item.setdefault("warnings", []).append(f"Stock name fetch failed. Reason: {exc}")
+
+    for item in results:
+        if item.get("error"):
+            continue
+        item["symbol_name"] = name_map.get(item["symbol"]) or None
+
+    try:
+        realtime_map = fetch_realtime_quotes(successful_symbols)
+    except Exception as exc:
+        realtime_map = {}
+        for item in results:
+            if item.get("error"):
+                continue
+            item.setdefault("warnings", []).append(
+                f"Realtime quote fetch failed; using historical latest close. Reason: {exc}"
+            )
+    for item in results:
+        if item.get("error"):
+            continue
+        symbol = item["symbol"]
+        quote = realtime_map.get(symbol)
+        if not quote:
+            continue
+        if quote.get("name"):
+            item["symbol_name"] = quote["name"]
+        item["realtime"] = quote
+        # Do not persist realtime data; only update response snapshot for UI freshness.
+        if quote.get("latest_price") is not None:
+            latest_price = dict(item.get("latest_price") or {})
+            latest_price["close"] = quote["latest_price"]
+            if quote.get("updated_at"):
+                latest_price["trade_date"] = str(quote["updated_at"])
+            item["latest_price"] = latest_price
 
     return {"results": results}
 
@@ -356,3 +454,143 @@ def stock_metrics(symbol: str = Query(..., description="6-digit A-share code")) 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return _compute_stock_metrics(normalized)
+
+
+@app.get("/api/realtime-prices")
+def realtime_prices(symbols: str = Query(..., description="Comma-separated 6-digit A-share codes")) -> dict:
+    """Return realtime quote snapshot for requested symbols without database persistence."""
+    try:
+        normalized_symbols = _parse_symbols_input(symbols)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    quotes = fetch_realtime_quotes(normalized_symbols)
+    return {"quotes": quotes}
+
+
+@app.get("/industry_cycles")
+def industry_cycles(
+    refresh: bool = Query(default=True, description="Refresh from AkShare before reading SQLite cache"),
+) -> dict:
+    """Return industry cycle dashboard rows with current value and 1Y/5Y percentiles."""
+    warnings: list[str] = []
+    existing_rows = fetch_industry_prices()
+    if refresh:
+        try:
+            # API assumption: upstream endpoints can fail; cached table remains the fallback source.
+            if _industry_history_is_sparse(existing_rows):
+                # Financial logic: use longer backfill when indicators are missing to avoid persistent blanks.
+                start_date = (dt.date.today() - dt.timedelta(days=365 * 3)).strftime("%Y%m%d")
+                warnings.append("Industry cache sparse; triggered extended backfill window.")
+            else:
+                start_date = _suggest_industry_refresh_start(existing_rows)
+            fetched_rows = fetch_industry_price_rows(start_date=start_date)
+            if fetched_rows:
+                upsert_industry_prices(fetched_rows)
+            else:
+                warnings.append("Industry data fetch returned 0 rows; using existing cache.")
+        except Exception as exc:
+            warnings.append(f"Industry data fetch failed; using existing cache. Reason: {exc}")
+
+    history_rows = fetch_industry_prices()
+    payload = _build_industry_cycles_payload(history_rows)
+    payload["warnings"] = warnings
+    # TODO: add optional per-indicator refresh flag to reduce network pressure.
+    return payload
+
+
+@app.get("/api/financial-report-analysis")
+def financial_report_analysis(symbol: str = Query(..., description="6-digit A-share code")) -> dict:
+    """Return normalized annual financial reports and auto-generated analysis insights."""
+    try:
+        normalized = normalize_stock_code(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    warnings: list[str] = []
+    try:
+        financial_rows = fetch_financial_summary(normalized)
+        upsert_financial_reports(normalized, financial_rows)
+        stored_financial_rows = fetch_financial_reports(normalized)
+    except Exception as exc:
+        stored_financial_rows = fetch_financial_reports(normalized)
+        if stored_financial_rows:
+            warnings.append(f"Financial fetch failed; returned cached data. Reason: {exc}")
+        else:
+            warnings.append(
+                f"Financial fetch failed; no cache available. Returned empty financial data. Reason: {exc}"
+            )
+            stored_financial_rows = []
+
+    symbol_name: str | None = None
+    try:
+        symbol_name = fetch_stock_names([normalized]).get(normalized) or None
+    except Exception as exc:
+        warnings.append(f"Stock name fetch failed. Reason: {exc}")
+
+    analysis_payload = compute_financial_report_analysis(stored_financial_rows)
+    analysis_payload["symbol"] = normalized
+    analysis_payload["symbol_name"] = symbol_name
+    analysis_payload["warnings"] = warnings
+    return analysis_payload
+
+
+@app.post("/api/financial-report-url-analysis")
+def financial_report_url_analysis(payload: FinancialReportUrlRequest) -> dict:
+    """Analyze a Chinese financial report web link and return extracted metrics."""
+    try:
+        fetched = fetch_report_text_from_url(payload.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - network/runtime variability
+        raise HTTPException(status_code=502, detail=f"Could not retrieve report URL content: {exc}") from exc
+
+    extracted = extract_financial_row_from_report_text(fetched["text"], title=fetched.get("title"))
+    report_year = extracted.get("report_year")
+    report_date = extracted.get("report_date")
+    if report_year is None and report_date:
+        report_year = int(str(report_date)[:4])
+    if report_year is None:
+        report_year = dt.date.today().year
+        extracted["warnings"] = [*extracted.get("warnings", []), "Used current year as fallback report_year."]
+    if not report_date:
+        report_date = f"{report_year}-12-31"
+
+    row = {
+        "report_year": report_year,
+        "report_date": report_date,
+        "revenue": extracted.get("revenue"),
+        "net_profit": extracted.get("net_profit"),
+        "roe": extracted.get("roe"),
+        "debt_ratio": extracted.get("debt_ratio"),
+    }
+    analysis_payload = compute_financial_report_analysis([row])
+    if extracted.get("warnings"):
+        analysis_payload["highlights"] = [
+            {
+                "level": "warn",
+                "title": "Parsing notes",
+                "detail": " | ".join(extracted["warnings"]),
+            },
+            *analysis_payload.get("highlights", []),
+        ]
+    if fetched.get("tls_insecure"):
+        analysis_payload["highlights"] = [
+            {
+                "level": "warn",
+                "title": "TLS warning",
+                "detail": "TLS verification was bypassed via REPORT_URL_INSECURE_SSL=1. Use only in trusted networks.",
+            },
+            *analysis_payload.get("highlights", []),
+        ]
+
+    return {
+        "source_url": fetched["url"],
+        "source_title": fetched.get("title"),
+        "content_type": fetched.get("content_type"),
+        "pdf_pages": fetched.get("pdf_pages"),
+        "tls_insecure": fetched.get("tls_insecure"),
+        "analysis": analysis_payload,
+        "extracted": extracted,
+    }

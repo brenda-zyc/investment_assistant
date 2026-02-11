@@ -55,6 +55,19 @@ def init_db() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS industry_prices (
+            industry TEXT NOT NULL,
+            indicator TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            value REAL,
+            source TEXT,
+            PRIMARY KEY (indicator, trade_date)
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -215,6 +228,65 @@ def fetch_macro_indicators_all(table_name: str) -> list[dict[str, Any]]:
         return []
 
     cur.execute(f"SELECT * FROM {table_name} ORDER BY date DESC")
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def upsert_industry_prices(rows: list[dict[str, Any]]) -> None:
+    """Insert or update industry indicator historical points."""
+    if not rows:
+        return
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.executemany(
+        """
+        INSERT INTO industry_prices (industry, indicator, trade_date, value, source)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(indicator, trade_date) DO UPDATE SET
+            industry=excluded.industry,
+            value=excluded.value,
+            source=excluded.source
+        """,
+        [
+            (
+                row["industry"],
+                row["indicator"],
+                row["trade_date"],
+                row.get("value"),
+                row.get("source"),
+            )
+            for row in rows
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def fetch_industry_prices(indicator: str | None = None) -> list[dict[str, Any]]:
+    """Fetch stored industry historical points sorted by indicator/date."""
+    conn = get_conn()
+    cur = conn.cursor()
+
+    if indicator:
+        cur.execute(
+            """
+            SELECT industry, indicator, trade_date, value, source
+            FROM industry_prices
+            WHERE indicator = ?
+            ORDER BY indicator ASC, trade_date ASC
+            """,
+            (indicator,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT industry, indicator, trade_date, value, source
+            FROM industry_prices
+            ORDER BY indicator ASC, trade_date ASC
+            """
+        )
     rows = [dict(row) for row in cur.fetchall()]
     conn.close()
     return rows

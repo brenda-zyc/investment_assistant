@@ -187,6 +187,12 @@
         font-weight: 700;
       }
 
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
       .card p {
         margin: 0 0 10px;
         color: var(--ink-soft);
@@ -444,6 +450,77 @@
         gap: 12px;
       }
 
+      .report-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      @media (min-width: 980px) {
+        .report-summary-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+
+      .report-kpi {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 10px;
+      }
+
+      .report-kpi .name {
+        color: #475569;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .report-kpi .value {
+        font-family: "Fira Code", monospace;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .report-insight-list {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .report-insight-item {
+        border-radius: 10px;
+        border: 1px solid #dbe3ef;
+        background: #f8fafc;
+        padding: 9px 10px;
+      }
+
+      .report-insight-item.ok {
+        border-color: #86efac;
+        background: #f0fdf4;
+      }
+
+      .report-insight-item.warn {
+        border-color: #fdba74;
+        background: #fff7ed;
+      }
+
+      .report-insight-item.risk {
+        border-color: #fca5a5;
+        background: #fef2f2;
+      }
+
+      .report-insight-item .title {
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 4px;
+      }
+
+      .report-insight-item .detail {
+        color: #475569;
+        font-size: 13px;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         * {
           animation: none !important;
@@ -467,6 +544,8 @@
       <div class="tabs" role="tablist" aria-label="Dashboard tabs">
         <button id="tabStockBtn" class="tab-btn active" data-tab="stockPanel" role="tab" aria-selected="true">Stock Analysis</button>
         <button id="tabMacroBtn" class="tab-btn" data-tab="macroPanel" role="tab" aria-selected="false">Macro Indicators</button>
+        <button id="tabIndustryBtn" class="tab-btn" data-tab="industryPanel" role="tab" aria-selected="false">Industry Cycles</button>
+        <button id="tabReportBtn" class="tab-btn" data-tab="reportPanel" role="tab" aria-selected="false">Financial Reports</button>
       </div>
 
       <section id="stockPanel" class="panel active" role="tabpanel">
@@ -499,6 +578,7 @@
                 <button id="analyzeBtn">Run Analysis</button>
               </div>
               <div class="muted" id="singleStatus"></div>
+              <div class="muted" id="realtimeStatus"></div>
             </div>
 
             <div class="card">
@@ -585,6 +665,7 @@
                   <thead>
                     <tr>
                       <th>Symbol</th>
+                      <th>Name</th>
                       <th>Latest Date</th>
                       <th>Close</th>
                       <th>Close Pctl</th>
@@ -647,6 +728,90 @@
           </div>
         </div>
       </section>
+
+      <section id="industryPanel" class="panel" role="tabpanel">
+        <div class="card">
+          <h2>Industry Cycle Dashboard</h2>
+          <p>Track key industry price indicators with current value and historical percentiles.</p>
+          <div class="row">
+            <button id="loadIndustryBtn">Load Industry Cycles</button>
+          </div>
+          <div class="muted" id="industryStatus"></div>
+          <div class="table-wrap">
+            <table id="industryTable">
+              <thead>
+                <tr>
+                  <th>Industry</th>
+                  <th>Indicator</th>
+                  <th>Value</th>
+                  <th>1Y Percentile</th>
+                  <th>5Y Percentile</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="reportPanel" class="panel" role="tabpanel">
+        <div class="card">
+          <h2>Financial Report Reader</h2>
+          <p>Load annual reports, inspect key metrics, and get auto-generated analysis highlights.</p>
+          <div class="row">
+            <input id="reportCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Financial report symbol" />
+            <button id="loadReportBtn">Load Financial Report</button>
+          </div>
+          <div class="row" style="margin-top: 8px">
+            <input id="reportUrlInput" type="text" placeholder="https://... (财报网页链接)" aria-label="Financial report URL" />
+            <button id="analyzeReportUrlBtn">Analyze Report URL</button>
+          </div>
+          <div class="tiny-note">支持中文网页链接（HTTP/HTTPS）和 PDF 文本解析。扫描版 PDF 暂不支持 OCR。</div>
+          <div class="muted" id="reportStatus"></div>
+          <div class="muted" id="reportSourceMeta"></div>
+
+          <div class="report-summary-grid" aria-live="polite">
+            <div class="report-kpi">
+              <div class="name">Latest Report Year</div>
+              <div id="reportMetricYear" class="value">-</div>
+            </div>
+            <div class="report-kpi">
+              <div class="name">Quality Score</div>
+              <div id="reportMetricScore" class="value">-</div>
+            </div>
+            <div class="report-kpi">
+              <div class="name">Revenue YoY</div>
+              <div id="reportMetricRevenueYoy" class="value">-</div>
+            </div>
+            <div class="report-kpi">
+              <div class="name">Net Profit YoY</div>
+              <div id="reportMetricProfitYoy" class="value">-</div>
+            </div>
+          </div>
+
+          <h3>Auto Analysis</h3>
+          <div id="reportInsightList" class="report-insight-list"></div>
+          <h3>Extraction Evidence</h3>
+          <div id="reportEvidenceList" class="report-insight-list"></div>
+
+          <div class="table-wrap">
+            <table id="reportDetailTable">
+              <thead>
+                <tr>
+                  <th>Year</th>
+                  <th>Report Date</th>
+                  <th>Revenue</th>
+                  <th>Net Profit</th>
+                  <th>Net Margin</th>
+                  <th>ROE (%)</th>
+                  <th>Debt Ratio (%)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
 
     <script>
@@ -657,12 +822,17 @@
 
       const tabStockBtn = document.getElementById("tabStockBtn");
       const tabMacroBtn = document.getElementById("tabMacroBtn");
+      const tabIndustryBtn = document.getElementById("tabIndustryBtn");
+      const tabReportBtn = document.getElementById("tabReportBtn");
       const stockPanel = document.getElementById("stockPanel");
       const macroPanel = document.getElementById("macroPanel");
+      const industryPanel = document.getElementById("industryPanel");
+      const reportPanel = document.getElementById("reportPanel");
 
       const analyzeBtn = document.getElementById("analyzeBtn");
       const stockCodeInput = document.getElementById("stockCode");
       const singleStatusEl = document.getElementById("singleStatus");
+      const realtimeStatusEl = document.getElementById("realtimeStatus");
 
       const metricSymbol = document.getElementById("metricSymbol");
       const metricClose = document.getElementById("metricClose");
@@ -691,11 +861,32 @@
       const macroTableBody = document.querySelector("#macroTable tbody");
       const stockMetricTableBody = document.querySelector("#stockMetricTable tbody");
       const stockMetricStatusEl = document.getElementById("stockMetricStatus");
+      const loadIndustryBtn = document.getElementById("loadIndustryBtn");
+      const industryStatusEl = document.getElementById("industryStatus");
+      const industryTableBody = document.querySelector("#industryTable tbody");
+      const reportCodeInput = document.getElementById("reportCode");
+      const loadReportBtn = document.getElementById("loadReportBtn");
+      const reportUrlInput = document.getElementById("reportUrlInput");
+      const analyzeReportUrlBtn = document.getElementById("analyzeReportUrlBtn");
+      const reportStatusEl = document.getElementById("reportStatus");
+      const reportSourceMetaEl = document.getElementById("reportSourceMeta");
+      const reportMetricYearEl = document.getElementById("reportMetricYear");
+      const reportMetricScoreEl = document.getElementById("reportMetricScore");
+      const reportMetricRevenueYoyEl = document.getElementById("reportMetricRevenueYoy");
+      const reportMetricProfitYoyEl = document.getElementById("reportMetricProfitYoy");
+      const reportInsightListEl = document.getElementById("reportInsightList");
+      const reportEvidenceListEl = document.getElementById("reportEvidenceList");
+      const reportDetailTableBody = document.querySelector("#reportDetailTable tbody");
 
       let currentPriceRows = [];
       let currentFinancialRows = [];
+      let currentSymbol = null;
+      let currentSymbolName = null;
+      let watchlistSymbols = [];
       let lastMacroRows = [];
       let macroLoadedOnce = false;
+      let industryLoadedOnce = false;
+      let reportLoadedOnce = false;
       const macroTableLabelMap = {
         macro_indicators: "Production Macro (macro_indicators)",
         macro_indicators_step1: "Core Macro (5 indicators)",
@@ -712,21 +903,43 @@
 
       function switchTab(targetId) {
         const isStock = targetId === "stockPanel";
+        const isMacro = targetId === "macroPanel";
+        const isIndustry = targetId === "industryPanel";
+        const isReport = targetId === "reportPanel";
         tabStockBtn.classList.toggle("active", isStock);
-        tabMacroBtn.classList.toggle("active", !isStock);
+        tabMacroBtn.classList.toggle("active", isMacro);
+        tabIndustryBtn.classList.toggle("active", isIndustry);
+        tabReportBtn.classList.toggle("active", isReport);
         tabStockBtn.setAttribute("aria-selected", String(isStock));
-        tabMacroBtn.setAttribute("aria-selected", String(!isStock));
+        tabMacroBtn.setAttribute("aria-selected", String(isMacro));
+        tabIndustryBtn.setAttribute("aria-selected", String(isIndustry));
+        tabReportBtn.setAttribute("aria-selected", String(isReport));
         stockPanel.classList.toggle("active", isStock);
-        macroPanel.classList.toggle("active", !isStock);
+        macroPanel.classList.toggle("active", isMacro);
+        industryPanel.classList.toggle("active", isIndustry);
+        reportPanel.classList.toggle("active", isReport);
 
-        if (!isStock && !macroLoadedOnce) {
+        if (isMacro && !macroLoadedOnce) {
           loadMacroIndicators();
           macroLoadedOnce = true;
+        }
+        if (isIndustry && !industryLoadedOnce) {
+          loadIndustryCycles();
+          industryLoadedOnce = true;
+        }
+        if (isReport && !reportLoadedOnce) {
+          if (currentSymbol) {
+            reportCodeInput.value = currentSymbol;
+            loadFinancialReport();
+          }
+          reportLoadedOnce = true;
         }
       }
 
       tabStockBtn.addEventListener("click", () => switchTab("stockPanel"));
       tabMacroBtn.addEventListener("click", () => switchTab("macroPanel"));
+      tabIndustryBtn.addEventListener("click", () => switchTab("industryPanel"));
+      tabReportBtn.addEventListener("click", () => switchTab("reportPanel"));
 
       function formatNumber(value, digits = 2) {
         if (value === null || value === undefined || value === "") return "-";
@@ -735,12 +948,37 @@
         return n.toLocaleString(undefined, { maximumFractionDigits: digits });
       }
 
+      function formatPercent(value, digits = 2) {
+        if (value === null || value === undefined || value === "") return "-";
+        const n = Number(value);
+        if (Number.isNaN(n)) return "-";
+        return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: digits })}%`;
+      }
+
+      function isBackendUnreachable(err) {
+        const message = String(err?.message || err || "").toLowerCase();
+        return (
+          err instanceof TypeError &&
+          (message.includes("failed to fetch") || message.includes("networkerror") || message.includes("load failed"))
+        );
+      }
+
       function resetMetrics() {
         metricSymbol.textContent = "-";
         metricClose.textContent = "-";
         metricChange.textContent = "-";
         metricChange.className = "value";
         metricQuality.textContent = "-";
+      }
+
+      function updateSingleRealtimeDisplay(quote) {
+        if (!quote) return;
+        const displaySymbol = quote.symbol || currentSymbol || "-";
+        const displayName = quote.name || currentSymbolName;
+        metricSymbol.textContent = displayName ? `${displaySymbol} ${displayName}` : displaySymbol;
+        if (quote.latest_price !== null && quote.latest_price !== undefined) {
+          metricClose.textContent = formatNumber(quote.latest_price);
+        }
       }
 
       function updateMetrics(symbol, priceRows, financialRows) {
@@ -818,6 +1056,78 @@
         });
       }
 
+      function resetFinancialReportPanel() {
+        reportMetricYearEl.textContent = "-";
+        reportMetricScoreEl.textContent = "-";
+        reportMetricRevenueYoyEl.textContent = "-";
+        reportMetricProfitYoyEl.textContent = "-";
+        reportInsightListEl.innerHTML = "";
+        reportEvidenceListEl.innerHTML = "";
+        reportDetailTableBody.innerHTML = "";
+        reportSourceMetaEl.textContent = "";
+      }
+
+      function renderFinancialReportSummary(payload) {
+        reportMetricYearEl.textContent = payload.latest_report_year ?? "-";
+        if (payload.score === null || payload.score === undefined) {
+          reportMetricScoreEl.textContent = "-";
+        } else {
+          reportMetricScoreEl.textContent = `${payload.score} / 100 (${payload.grade || "-"})`;
+        }
+        reportMetricRevenueYoyEl.textContent = formatPercent(payload.metrics?.revenue_yoy);
+        reportMetricProfitYoyEl.textContent = formatPercent(payload.metrics?.net_profit_yoy);
+      }
+
+      function renderFinancialReportHighlights(highlights) {
+        reportInsightListEl.innerHTML = "";
+        (highlights || []).forEach((item) => {
+          const level = item.level || "info";
+          const div = document.createElement("div");
+          div.className = `report-insight-item ${level}`;
+          div.innerHTML = `
+            <div class="title">${item.title || "-"}</div>
+            <div class="detail">${item.detail || "-"}</div>
+          `;
+          reportInsightListEl.appendChild(div);
+        });
+      }
+
+      function renderFinancialReportEvidence(evidence) {
+        reportEvidenceListEl.innerHTML = "";
+        (evidence || []).forEach((item) => {
+          const div = document.createElement("div");
+          div.className = "report-insight-item";
+          div.innerHTML = `
+            <div class="title">${item.metric || "-"}: ${item.raw_number || "-"}</div>
+            <div class="detail">keyword=${item.keyword || "-"} | ${item.snippet || "-"}</div>
+          `;
+          reportEvidenceListEl.appendChild(div);
+        });
+      }
+
+      function renderFinancialReportTable(rows) {
+        reportDetailTableBody.innerHTML = "";
+        (rows || []).forEach((row) => {
+          const revenue = Number(row.revenue);
+          const netProfit = Number(row.net_profit);
+          const netMargin =
+            Number.isFinite(revenue) && revenue !== 0 && Number.isFinite(netProfit)
+              ? netProfit / revenue
+              : null;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.report_year ?? "-"}</td>
+            <td>${row.report_date ?? "-"}</td>
+            <td>${formatNumber(row.revenue)}</td>
+            <td>${formatNumber(row.net_profit)}</td>
+            <td>${formatPercent(netMargin)}</td>
+            <td>${formatNumber(row.roe)}</td>
+            <td>${formatNumber(row.debt_ratio)}</td>
+          `;
+          reportDetailTableBody.appendChild(tr);
+        });
+      }
+
       function metricDisplayName(name) {
         const mapping = {
           pe_ttm: "PE (TTM)",
@@ -880,6 +1190,9 @@
 
           currentPriceRows = data.price_data || [];
           currentFinancialRows = data.financial_summary || [];
+          currentSymbol = data.symbol || code;
+          currentSymbolName = data.symbol_name || data.realtime?.name || null;
+          reportCodeInput.value = currentSymbol;
           renderPriceRows(currentPriceRows);
           renderFinancialRows(currentFinancialRows);
           renderStockMetricRows(metricData.metrics || []);
@@ -887,23 +1200,35 @@
             ? `As of: ${metricData.as_of}.`
             : "As of: -";
           updateMetrics(data.symbol, currentPriceRows, currentFinancialRows);
+          if (data.realtime) {
+            updateSingleRealtimeDisplay(data.realtime);
+            if (data.realtime.updated_at) {
+              realtimeStatusEl.textContent = `Realtime as of ${data.realtime.updated_at}.`;
+            }
+          } else {
+            metricSymbol.textContent = currentSymbolName ? `${currentSymbol} ${currentSymbolName}` : currentSymbol;
+            realtimeStatusEl.textContent = "";
+          }
 
           const warningText = (data.warnings || []).length
             ? ` Warnings: ${(data.warnings || []).join(" | ")}`
             : "";
           singleStatusEl.textContent = `Loaded ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
         } catch (err) {
-          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+          if (isBackendUnreachable(err)) {
             singleStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
             singleStatusEl.textContent = `Error: ${err.message}`;
           }
           currentPriceRows = [];
           currentFinancialRows = [];
+          currentSymbol = null;
+          currentSymbolName = null;
           priceTableBody.innerHTML = "";
           financialTableBody.innerHTML = "";
           stockMetricTableBody.innerHTML = "";
           stockMetricStatusEl.textContent = "";
+          realtimeStatusEl.textContent = "";
           priceMetaEl.textContent = "";
           resetMetrics();
         } finally {
@@ -936,18 +1261,22 @@
 
       function renderWatchlistRows(rows) {
         watchlistTableBody.innerHTML = "";
+        watchlistSymbols = [];
         rows.forEach((item) => {
           const p = item.latest_price || {};
           const f = item.latest_financial || {};
+          const nameText = item.symbol_name || item.realtime?.name || "-";
           const closePercentileText =
             item.close_percentile === null || item.close_percentile === undefined
               ? "-"
               : `${item.close_percentile}%`;
           const tr = document.createElement("tr");
+          tr.setAttribute("data-symbol", item.symbol ?? "");
           tr.innerHTML = `
             <td>${item.symbol ?? "-"}</td>
-            <td>${p.trade_date ?? "-"}</td>
-            <td>${formatNumber(p.close)}</td>
+            <td class="watchlist-name">${nameText}</td>
+            <td class="watchlist-time">${p.trade_date ?? "-"}</td>
+            <td class="watchlist-close">${formatNumber(p.close)}</td>
             <td>${closePercentileText}</td>
             <td>${formatNumber(f.revenue)}</td>
             <td>${formatNumber(f.net_profit)}</td>
@@ -956,7 +1285,53 @@
             <td>${watchlistStatusBadge(item)}</td>
           `;
           watchlistTableBody.appendChild(tr);
+          if (item.symbol && !item.error) {
+            watchlistSymbols.push(item.symbol);
+          }
         });
+      }
+
+      function applyRealtimeToWatchlist(quotes) {
+        Object.entries(quotes || {}).forEach(([symbol, quote]) => {
+          const row = watchlistTableBody.querySelector(`tr[data-symbol="${symbol}"]`);
+          if (!row) return;
+          const closeCell = row.querySelector(".watchlist-close");
+          const timeCell = row.querySelector(".watchlist-time");
+          const nameCell = row.querySelector(".watchlist-name");
+          if (closeCell && quote.latest_price !== null && quote.latest_price !== undefined) {
+            closeCell.textContent = formatNumber(quote.latest_price);
+          }
+          if (timeCell && quote.updated_at) {
+            timeCell.textContent = String(quote.updated_at);
+          }
+          if (nameCell && quote.name) {
+            nameCell.textContent = quote.name;
+          }
+        });
+      }
+
+      async function refreshRealtimePrices() {
+        const symbolPool = [];
+        if (currentSymbol) symbolPool.push(currentSymbol);
+        watchlistSymbols.forEach((symbol) => {
+          if (!symbolPool.includes(symbol)) symbolPool.push(symbol);
+        });
+        if (!symbolPool.length) return;
+
+        try {
+          const url = `${apiBase}/api/realtime-prices?symbols=${encodeURIComponent(symbolPool.join(","))}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          if (!res.ok) return;
+          const quotes = data.quotes || {};
+          if (currentSymbol && quotes[currentSymbol]) {
+            updateSingleRealtimeDisplay(quotes[currentSymbol]);
+          }
+          applyRealtimeToWatchlist(quotes);
+          realtimeStatusEl.textContent = `Realtime refreshed at ${new Date().toLocaleTimeString()}.`;
+        } catch (err) {
+          // Silent fail: realtime feed should not block base analysis UX.
+        }
       }
 
       async function analyzeWatchlist() {
@@ -984,13 +1359,92 @@
           watchlistStatusEl.textContent = `Loaded watchlist. ${okCount}/${rows.length} symbols succeeded.`;
         } catch (err) {
           watchlistTableBody.innerHTML = "";
-          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+          if (isBackendUnreachable(err)) {
             watchlistStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
             watchlistStatusEl.textContent = `Error: ${err.message}`;
           }
         } finally {
           analyzeWatchlistBtn.disabled = false;
+        }
+      }
+
+      async function loadFinancialReport() {
+        const code = reportCodeInput.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
+          return;
+        }
+
+        loadReportBtn.disabled = true;
+        reportStatusEl.textContent = "Loading financial reports...";
+
+        try {
+          const res = await fetch(`${apiBase}/api/financial-report-analysis?symbol=${encodeURIComponent(code)}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          renderFinancialReportSummary(data);
+          renderFinancialReportHighlights(data.highlights || []);
+          renderFinancialReportEvidence([]);
+          renderFinancialReportTable(data.series || []);
+          reportSourceMetaEl.textContent = "";
+
+          const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
+          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          reportStatusEl.textContent = `Loaded ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
+        } catch (err) {
+          resetFinancialReportPanel();
+          if (isBackendUnreachable(err)) {
+            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            reportStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          loadReportBtn.disabled = false;
+        }
+      }
+
+      async function loadFinancialReportFromUrl() {
+        const url = reportUrlInput.value.trim();
+        if (!/^https?:\/\//i.test(url)) {
+          reportStatusEl.textContent = "Please input a valid http(s) report URL.";
+          return;
+        }
+
+        analyzeReportUrlBtn.disabled = true;
+        reportStatusEl.textContent = "Fetching and parsing report URL...";
+
+        try {
+          const res = await fetch(`${apiBase}/api/financial-report-url-analysis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          const analysis = data.analysis || {};
+          renderFinancialReportSummary(analysis);
+          renderFinancialReportHighlights(analysis.highlights || []);
+          renderFinancialReportEvidence(data.extracted?.evidence || []);
+          renderFinancialReportTable(analysis.series || []);
+
+          const sourceTitle = data.source_title ? `Title: ${data.source_title}. ` : "";
+          const pageText =
+            data.pdf_pages === null || data.pdf_pages === undefined ? "" : `PDF pages: ${data.pdf_pages}. `;
+          const tlsText = data.tls_insecure ? "TLS: insecure fallback enabled. " : "";
+          reportSourceMetaEl.textContent = `${sourceTitle}${pageText}${tlsText}Content-Type: ${data.content_type || "-"}.`;
+          reportStatusEl.textContent = `URL parsed successfully. As of: ${analysis.as_of || "-"}.`;
+        } catch (err) {
+          resetFinancialReportPanel();
+          if (isBackendUnreachable(err)) {
+            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            reportStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          analyzeReportUrlBtn.disabled = false;
         }
       }
 
@@ -1001,6 +1455,35 @@
 
       function clearMacroSignals() {
         macroSignalTableBody.innerHTML = "";
+      }
+
+      function renderIndustryRows(rows) {
+        industryTableBody.innerHTML = "";
+        rows.forEach((row) => {
+          const oneYear = row["1y_percentile"] == null ? "-" : `${row["1y_percentile"]}%`;
+          const fiveYear = row["5y_percentile"] == null ? "-" : `${row["5y_percentile"]}%`;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.industry ?? "-"}</td>
+            <td>${row.indicator ?? "-"}</td>
+            <td>${formatNumber(row.value)}</td>
+            <td>${oneYear}</td>
+            <td>${fiveYear}</td>
+          `;
+          industryTableBody.appendChild(tr);
+        });
+      }
+
+      function flattenIndustryGroups(data) {
+        const groups = data?.groups;
+        if (!Array.isArray(groups) || !groups.length) {
+          return Array.isArray(data?.rows) ? data.rows : [];
+        }
+        const out = [];
+        groups.forEach((group) => {
+          (group?.rows || []).forEach((row) => out.push(row));
+        });
+        return out;
       }
 
       function renderMacroSignals(rows) {
@@ -1152,13 +1635,43 @@
           clearMacroTable();
           clearMacroSignals();
           valuationPanelEl.innerHTML = "";
-          if (String(err.message || "").toLowerCase().includes("failed to fetch")) {
+          if (isBackendUnreachable(err)) {
             macroStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}. Table cleared (not refreshed).`;
           } else {
             macroStatusEl.textContent = `Error: ${err.message}`;
           }
         } finally {
           loadMacroBtn.disabled = false;
+        }
+      }
+
+      async function loadIndustryCycles() {
+        loadIndustryBtn.disabled = true;
+        industryStatusEl.textContent = "Loading industry cycles...";
+        industryTableBody.innerHTML = "";
+
+        try {
+          const res = await fetch(`${apiBase}/industry_cycles?refresh=true`);
+          const bodyText = await res.text();
+          let data = {};
+          try {
+            data = bodyText ? JSON.parse(bodyText) : {};
+          } catch (_err) {
+            throw new Error(`Backend returned non-JSON response (HTTP ${res.status}).`);
+          }
+          if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
+          const rows = flattenIndustryGroups(data);
+          renderIndustryRows(rows);
+          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}.${warningText}`;
+        } catch (err) {
+          if (isBackendUnreachable(err)) {
+            industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            industryStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          loadIndustryBtn.disabled = false;
         }
       }
 
@@ -1177,10 +1690,22 @@
         const rows = macroFillMissing.checked ? fillMissingValues(lastMacroRows) : lastMacroRows;
         renderMacroRows(rows);
       });
+      loadIndustryBtn.addEventListener("click", loadIndustryCycles);
+      loadReportBtn.addEventListener("click", loadFinancialReport);
+      reportCodeInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") loadFinancialReport();
+      });
+      analyzeReportUrlBtn.addEventListener("click", loadFinancialReportFromUrl);
+      reportUrlInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") loadFinancialReportFromUrl();
+      });
 
       resetMetrics();
+      resetFinancialReportPanel();
       loadMacroIndicators();
       macroLoadedOnce = true;
+      // Poll realtime prices every 30 seconds; realtime values are not persisted.
+      setInterval(refreshRealtimePrices, 30000);
     </script>
   </body>
 </html>
