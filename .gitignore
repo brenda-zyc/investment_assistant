@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+
+.venv/
+.pytest_cache/
+__pycache__/
+*/__pycache__/
+*.pyc
+
+.coverage
+htmlcov/
+
+investment.db
+127.0.0.1
