@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from app import data_service
-from app.data_service import extract_financial_row_from_report_text, fetch_report_text_from_url
+from app.services import financial_report_service as report_service
+from app.services.financial_report_service import extract_financial_row_from_report_text, fetch_report_text_from_url
 
 
 def test_extract_financial_row_from_chinese_report_text() -> None:
@@ -63,8 +63,8 @@ def test_fetch_report_text_from_url_pdf_branch(monkeypatch) -> None:
         assert max_pages == 120
         return ("2024年 营业收入 100 亿元 净利润 10 亿元 ROE 15% 资产负债率 45%", 88)
 
-    monkeypatch.setattr(data_service, "urlopen", fake_urlopen)
-    monkeypatch.setattr(data_service, "_extract_pdf_text", fake_extract_pdf_text)
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
+    monkeypatch.setattr(report_service, "_extract_pdf_text", fake_extract_pdf_text)
 
     out = fetch_report_text_from_url("https://example.com/reports/annual-2024.pdf")
     assert out["content_type"] == "application/pdf"
@@ -75,11 +75,11 @@ def test_fetch_report_text_from_url_pdf_branch(monkeypatch) -> None:
 
 
 def test_extract_pdf_text_without_available_parser(monkeypatch) -> None:
-    monkeypatch.setattr(data_service, "PdfReader", None)
-    monkeypatch.setattr(data_service.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(report_service, "PdfReader", None)
+    monkeypatch.setattr(report_service.shutil, "which", lambda _name: None)
 
     with pytest.raises(RuntimeError) as exc_info:
-        data_service._extract_pdf_text(b"%PDF-1.4 fake")
+        report_service._extract_pdf_text(b"%PDF-1.4 fake")
     assert "Failed to parse PDF text" in str(exc_info.value)
 
 
@@ -91,7 +91,7 @@ def test_fetch_report_text_from_url_ssl_verify_failure_with_hint(monkeypatch) ->
         _ = timeout, context
         raise RuntimeError("certificate verify failed")
 
-    monkeypatch.setattr(data_service, "urlopen", fake_urlopen)
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
     monkeypatch.delenv("REPORT_URL_INSECURE_SSL", raising=False)
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -106,7 +106,7 @@ def test_fetch_report_text_from_url_pdf_size_limit(monkeypatch) -> None:
         _ = timeout, context
         return _DummyResponse(payload, "application/pdf")
 
-    monkeypatch.setattr(data_service, "urlopen", fake_urlopen)
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
     monkeypatch.setenv("REPORT_PDF_MAX_MB", "1")
 
     with pytest.raises(RuntimeError) as exc_info:

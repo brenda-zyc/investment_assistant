@@ -9,11 +9,17 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
 
-from app.data_service import (
-    build_revenue_cagr_5y_series,
+from app.services.financial_report_service import (
     extract_financial_row_from_report_text,
-    fetch_financial_metric_series,
     fetch_report_text_from_url,
+)
+from app.services.industry_data_service import (
+    fetch_industry_price_rows_with_diagnostics,
+    get_industry_indicator_specs,
+)
+from app.services.market_data_service import (
+    build_revenue_cagr_5y_series,
+    fetch_financial_metric_series,
     fetch_financial_summary,
     fetch_price_data,
     fetch_realtime_quotes,
@@ -21,14 +27,11 @@ from app.data_service import (
     fetch_valuation_series,
     normalize_stock_code,
 )
-from app.industry_service import fetch_industry_price_rows, get_industry_indicator_specs
 from app.core_logic import (
     compute_financial_report_analysis,
     compute_latest_close_percentile,
     compute_macro_signals,
-    compute_percentile_from_points,
     compute_stock_metrics,
-    signal_from_percentile,
     to_float,
 )
 from app.db import (
@@ -77,10 +80,6 @@ def _compute_latest_close_percentile(price_rows: list[dict]) -> int | None:
     """Compute percentile of latest close within stored close history."""
     return compute_latest_close_percentile(price_rows)
 
-def _compute_percentile_from_points(points: list[tuple[str, float]], min_samples: int = 24) -> dict:
-    """Compute latest-value percentile within a metric's historical series."""
-    return compute_percentile_from_points(points, min_samples=min_samples)
-
 def _compute_stock_metrics(symbol: str) -> dict:
     """Build stock metric payload with value/percentile and sampling metadata."""
 
@@ -107,10 +106,6 @@ def _compute_stock_metrics(symbol: str) -> dict:
 def _to_float(value: object) -> float | None:
     """Convert raw value into float when possible."""
     return to_float(value)
-
-def _signal_from_percentile(percentile: int) -> tuple[str, str]:
-    """Map percentile to valuation-style signal label and color."""
-    return signal_from_percentile(percentile)
 
 def _compute_macro_signals(rows: list[dict]) -> list[dict]:
     """Compute percentile-based macro signals using full available history."""
@@ -144,10 +139,12 @@ def _compute_window_percentile(
     return max(0, min(100, percentile)), len(window_values)
 
 
-def _build_industry_cycles_payload(rows: list[dict]) -> dict:
+def _build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = None) -> dict:
     """Build current value plus 1Y/5Y percentile payload for industry indicators."""
     grouped_points: dict[str, list[tuple[dt.date, float]]] = {}
     grouped_meta: dict[str, dict[str, str]] = {}
+    diagnostics = diagnostics or {}
+    indicator_status_map: dict[str, dict] = diagnostics.get("indicator_status", {}) or {}
 
     for row in rows:
         indicator_key = str(row.get("indicator") or "").strip()
@@ -174,6 +171,7 @@ def _build_industry_cycles_payload(rows: list[dict]) -> dict:
         indicator_key = spec["indicator_key"]
         points = grouped_points.get(indicator_key, [])
         if not points:
+            status_item = indicator_status_map.get(indicator_key, {})
             row_payload = (
                 {
                     "industry": spec["industry"],
@@ -183,6 +181,8 @@ def _build_industry_cycles_payload(rows: list[dict]) -> dict:
                     "5y_percentile": None,
                     "as_of": None,
                     "source": None,
+                    "status": status_item.get("status") or "no_data",
+                    "error": status_item.get("error"),
                 }
             )
             output_rows.append(row_payload)
@@ -194,6 +194,7 @@ def _build_industry_cycles_payload(rows: list[dict]) -> dict:
         p5y, _ = _compute_window_percentile(points, latest_date, latest_value, window_days=365 * 5)
         as_of_text = latest_date.isoformat()
         as_of_candidates.append(as_of_text)
+        status_item = indicator_status_map.get(indicator_key, {})
         row_payload = (
             {
                 "industry": spec["industry"],
@@ -203,6 +204,8 @@ def _build_industry_cycles_payload(rows: list[dict]) -> dict:
                 "5y_percentile": p5y,
                 "as_of": as_of_text,
                 "source": grouped_meta.get(indicator_key, {}).get("source") or None,
+                "status": status_item.get("status") or "ok",
+                "error": status_item.get("error"),
             }
         )
         output_rows.append(row_payload)
@@ -226,6 +229,7 @@ def _build_industry_cycles_payload(rows: list[dict]) -> dict:
         "as_of": max(as_of_candidates) if as_of_candidates else None,
         "rows": output_rows,
         "groups": industry_groups,
+        "dns": diagnostics.get("dns") or {},
     }
 
 
@@ -473,6 +477,7 @@ def industry_cycles(
 ) -> dict:
     """Return industry cycle dashboard rows with current value and 1Y/5Y percentiles."""
     warnings: list[str] = []
+    diagnostics: dict = {}
     existing_rows = fetch_industry_prices()
     if refresh:
         try:
@@ -483,7 +488,7 @@ def industry_cycles(
                 warnings.append("Industry cache sparse; triggered extended backfill window.")
             else:
                 start_date = _suggest_industry_refresh_start(existing_rows)
-            fetched_rows = fetch_industry_price_rows(start_date=start_date)
+            fetched_rows, diagnostics = fetch_industry_price_rows_with_diagnostics(start_date=start_date)
             if fetched_rows:
                 upsert_industry_prices(fetched_rows)
             else:
@@ -492,7 +497,7 @@ def industry_cycles(
             warnings.append(f"Industry data fetch failed; using existing cache. Reason: {exc}")
 
     history_rows = fetch_industry_prices()
-    payload = _build_industry_cycles_payload(history_rows)
+    payload = _build_industry_cycles_payload(history_rows, diagnostics=diagnostics)
     payload["warnings"] = warnings
     # TODO: add optional per-indicator refresh flag to reduce network pressure.
     return payload
