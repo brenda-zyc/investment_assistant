@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 
 from app.usecases.industry_usecase import get_industry_cycles
 
+# API layer guideline: endpoint remains a thin adapter over industry orchestration.
 router = APIRouter()
 
 

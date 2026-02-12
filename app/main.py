@@ -14,6 +14,7 @@ def create_app() -> FastAPI:
         init_db()
 
     register_routers(application)
+    # TODO: Add environment-driven FastAPI settings (docs URL, trusted hosts, CORS policy).
     return application
 
 

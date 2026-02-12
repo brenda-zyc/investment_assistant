@@ -9,6 +9,7 @@ from app.usecases.market_usecase import (
     parse_symbols_input,
 )
 
+# API layer guideline: keep this module thin (validate request, delegate to usecase, map errors).
 router = APIRouter()
 
 
@@ -40,6 +41,7 @@ def analyze_multi(payload: MultiAnalyzeRequest) -> dict:
     raw_codes = payload.stock_codes or []
     if not raw_codes:
         raise HTTPException(status_code=400, detail="stock_codes cannot be empty")
+    # API assumption: usecase enforces watchlist cap to keep latency predictable.
     return analyze_multi_symbols(raw_codes)
 
 

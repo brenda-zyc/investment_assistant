@@ -7,6 +7,7 @@ from app.usecases.financial_report_usecase import (
     get_financial_report_analysis,
 )
 
+# API layer guideline: keep exception-to-HTTP mapping centralized in route functions.
 router = APIRouter()
 
 
@@ -32,6 +33,7 @@ def financial_report_url_analysis(payload: FinancialReportUrlRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        # API assumption: parsing/runtime report issues are treated as unprocessable content.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - network/runtime variability
         raise HTTPException(status_code=502, detail=f"Could not retrieve report URL content: {exc}") from exc
