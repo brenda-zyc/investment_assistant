@@ -746,6 +746,9 @@
                   <th>Value</th>
                   <th>1Y Percentile</th>
                   <th>5Y Percentile</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Error</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1462,6 +1465,9 @@
         rows.forEach((row) => {
           const oneYear = row["1y_percentile"] == null ? "-" : `${row["1y_percentile"]}%`;
           const fiveYear = row["5y_percentile"] == null ? "-" : `${row["5y_percentile"]}%`;
+          const source = row.source || "-";
+          const status = row.status || "-";
+          const errorText = row.error || "-";
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td>${row.industry ?? "-"}</td>
@@ -1469,6 +1475,9 @@
             <td>${formatNumber(row.value)}</td>
             <td>${oneYear}</td>
             <td>${fiveYear}</td>
+            <td>${source}</td>
+            <td>${status}</td>
+            <td>${errorText}</td>
           `;
           industryTableBody.appendChild(tr);
         });
