@@ -27,6 +27,8 @@ _HTTP_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _METRIC_NUM_RE = re.compile(r"([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*(亿|万|元|%)?")
+_SNIPPET_LEFT_CHARS = 20
+_SNIPPET_RIGHT_CHARS = 120
 
 
 def _decode_http_bytes(raw: bytes, content_type: str) -> str:
@@ -257,6 +259,71 @@ def _to_numeric_value(number_text: str, unit: str) -> float | None:
     return value
 
 
+def _get_snippet_window(text: str, keyword_start: int) -> tuple[str, int]:
+    """Return local snippet around a keyword plus snippet start offset."""
+    snippet_start = max(0, keyword_start - _SNIPPET_LEFT_CHARS)
+    snippet_end = min(len(text), keyword_start + _SNIPPET_RIGHT_CHARS)
+    return text[snippet_start:snippet_end], snippet_start
+
+
+def _is_candidate_valid(metric_name: str, unit: str, value: float, require_percent: bool) -> bool:
+    """Return whether a numeric candidate is valid for the target metric."""
+    # Data cleaning rule: plain 4-digit values are commonly years, not financial metrics.
+    if unit == "" and 1900 <= value <= 2100:
+        return False
+    # Financial logic: revenue/net-profit candidates should not come from percentage values.
+    if metric_name in {"revenue", "net_profit"} and unit == "%":
+        return False
+    if require_percent and unit != "%":
+        return False
+    return True
+
+
+def _score_candidate(
+    *,
+    distance: int,
+    unit: str,
+    value: float,
+    require_percent: bool,
+    prefer_large_amount: bool,
+) -> float:
+    """Score one candidate value near a keyword; higher is better."""
+    # Percentile-like ranking principle: score combines proximity + domain-specific priors.
+    score = 120 - distance
+    if unit:
+        score += 12
+    if require_percent and unit == "%":
+        score += 20
+    if prefer_large_amount and unit in {"亿", "万"}:
+        score += 18
+    if prefer_large_amount and unit == "" and abs(value) < 1000:
+        score -= 15
+    return score
+
+
+def _build_candidate_evidence(
+    *,
+    metric_name: str,
+    keyword: str,
+    number_text: str,
+    unit: str,
+    snippet: str,
+    distance: int,
+    score: float,
+    parsed_value: float,
+) -> dict[str, Any]:
+    """Build evidence payload for explainability and debugging."""
+    return {
+        "metric": metric_name,
+        "keyword": keyword,
+        "raw_number": f"{number_text}{unit}",
+        "parsed_value": parsed_value,
+        "distance": distance,
+        "score": score,
+        "snippet": snippet.strip()[:180],
+    }
+
+
 def _best_metric_match(
     text: str,
     keywords: list[str],
@@ -270,9 +337,7 @@ def _best_metric_match(
     for keyword in keywords:
         for key_match in re.finditer(re.escape(keyword), text, flags=re.IGNORECASE):
             kw_start = key_match.start()
-            snippet_start = max(0, kw_start - 20)
-            snippet_end = min(len(text), kw_start + 120)
-            snippet = text[snippet_start:snippet_end]
+            snippet, snippet_start = _get_snippet_window(text, kw_start)
             for num_match in _METRIC_NUM_RE.finditer(snippet):
                 number_text = num_match.group(1)
                 unit = num_match.group(2) or ""
@@ -280,34 +345,32 @@ def _best_metric_match(
                 if value is None:
                     continue
 
-                if unit == "" and 1900 <= value <= 2100:
-                    continue
-                if metric_name in {"revenue", "net_profit"} and unit == "%":
-                    continue
-                if require_percent and unit != "%":
+                if not _is_candidate_valid(metric_name, unit, value, require_percent):
                     continue
 
                 distance = abs((snippet_start + num_match.start()) - kw_start)
-                score = 120 - distance
-                if unit:
-                    score += 12
-                if require_percent and unit == "%":
-                    score += 20
-                if prefer_large_amount and unit in {"亿", "万"}:
-                    score += 18
-                if prefer_large_amount and unit == "" and abs(value) < 1000:
-                    score -= 15
-
-                evidence = {
-                    "metric": metric_name,
-                    "keyword": keyword,
-                    "raw_number": f"{number_text}{unit}",
-                    "snippet": snippet.strip()[:180],
-                }
+                score = _score_candidate(
+                    distance=distance,
+                    unit=unit,
+                    value=value,
+                    require_percent=require_percent,
+                    prefer_large_amount=prefer_large_amount,
+                )
+                evidence = _build_candidate_evidence(
+                    metric_name=metric_name,
+                    keyword=keyword,
+                    number_text=number_text,
+                    unit=unit,
+                    snippet=snippet,
+                    distance=distance,
+                    score=score,
+                    parsed_value=value,
+                )
                 candidate = (score, value, evidence)
                 if best is None or candidate[0] > best[0]:
                     best = candidate
 
+    # TODO: Expose scoring weights as config for per-industry tuning.
     if best is None:
         return None, None
     return best[1], best[2]

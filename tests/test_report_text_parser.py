@@ -21,6 +21,10 @@ def test_extract_financial_row_from_chinese_report_text() -> None:
     assert payload["roe"] == 15.2
     assert payload["debt_ratio"] == 48.6
     assert len(payload["evidence"]) >= 4
+    for evidence in payload["evidence"]:
+        assert "parsed_value" in evidence
+        assert "distance" in evidence
+        assert "score" in evidence
 
 
 def test_extract_financial_row_with_sparse_text() -> None:

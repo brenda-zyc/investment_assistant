@@ -37,6 +37,31 @@ def _compute_window_percentile(
     return max(0, min(100, percentile)), len(window_values)
 
 
+def _build_indicator_row(
+    spec: dict[str, str],
+    *,
+    value: float | None,
+    percentile_1y: int | None,
+    percentile_5y: int | None,
+    as_of: str | None,
+    source: str | None,
+    status_item: dict,
+    default_status: str,
+) -> dict:
+    """Build one normalized row for industry cycle output."""
+    return {
+        "industry": spec["industry"],
+        "indicator": spec["indicator"],
+        "value": value,
+        "1y_percentile": percentile_1y,
+        "5y_percentile": percentile_5y,
+        "as_of": as_of,
+        "source": source,
+        "status": status_item.get("status") or default_status,
+        "error": status_item.get("error"),
+    }
+
+
 def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = None) -> dict:
     """Build current value plus 1Y/5Y percentile payload for industry indicators."""
     grouped_points: dict[str, list[tuple[dt.date, float]]] = {}
@@ -65,23 +90,23 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     output_rows: list[dict] = []
     grouped_output_rows: dict[str, list[dict]] = {}
     as_of_candidates: list[str] = []
+    specs = get_industry_indicator_specs()
 
-    for spec in get_industry_indicator_specs():
+    for spec in specs:
         indicator_key = spec["indicator_key"]
         points = grouped_points.get(indicator_key, [])
         if not points:
             status_item = indicator_status_map.get(indicator_key, {})
-            row_payload = {
-                "industry": spec["industry"],
-                "indicator": spec["indicator"],
-                "value": None,
-                "1y_percentile": None,
-                "5y_percentile": None,
-                "as_of": None,
-                "source": None,
-                "status": status_item.get("status") or "no_data",
-                "error": status_item.get("error"),
-            }
+            row_payload = _build_indicator_row(
+                spec,
+                value=None,
+                percentile_1y=None,
+                percentile_5y=None,
+                as_of=None,
+                source=None,
+                status_item=status_item,
+                default_status="no_data",
+            )
             output_rows.append(row_payload)
             grouped_output_rows.setdefault(spec["industry"], []).append(row_payload)
             continue
@@ -92,23 +117,22 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
         as_of_text = latest_date.isoformat()
         as_of_candidates.append(as_of_text)
         status_item = indicator_status_map.get(indicator_key, {})
-        row_payload = {
-            "industry": spec["industry"],
-            "indicator": spec["indicator"],
-            "value": latest_value,
-            "1y_percentile": p1y,
-            "5y_percentile": p5y,
-            "as_of": as_of_text,
-            "source": grouped_meta.get(indicator_key, {}).get("source") or None,
-            "status": status_item.get("status") or "ok",
-            "error": status_item.get("error"),
-        }
+        row_payload = _build_indicator_row(
+            spec,
+            value=latest_value,
+            percentile_1y=p1y,
+            percentile_5y=p5y,
+            as_of=as_of_text,
+            source=grouped_meta.get(indicator_key, {}).get("source") or None,
+            status_item=status_item,
+            default_status="ok",
+        )
         output_rows.append(row_payload)
         grouped_output_rows.setdefault(spec["industry"], []).append(row_payload)
 
     industry_groups: list[dict] = []
     seen_industries: set[str] = set()
-    for spec in get_industry_indicator_specs():
+    for spec in specs:
         industry = spec["industry"]
         if industry in seen_industries:
             continue
@@ -149,7 +173,8 @@ def industry_history_is_sparse(rows: list[dict], min_points_per_indicator: int =
             continue
         counts[indicator] = counts.get(indicator, 0) + 1
 
-    for spec in get_industry_indicator_specs():
+    specs = get_industry_indicator_specs()
+    for spec in specs:
         indicator_key = spec["indicator_key"]
         if counts.get(indicator_key, 0) < min_points_per_indicator:
             return True

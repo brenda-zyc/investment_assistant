@@ -104,6 +104,72 @@ def _extract_financial_rows_report_style(df: pd.DataFrame) -> list[dict[str, Any
     return rows
 
 
+_FINANCIAL_ROW_METRIC_SPEC: dict[str, dict[str, list[str]]] = {
+    "revenue": {
+        "include": ["营业总收入", "营业收入", "主营业务收入"],
+        "exclude": ["增长", "同比", "每股", "占比"],
+        "prefer": ["营业总收入", "营业收入"],
+    },
+    "net_profit": {
+        "include": ["归母净利润", "净利润"],
+        "exclude": ["增长", "同比", "每股", "扣非", "现金流"],
+        "prefer": ["归母净利润", "净利润"],
+    },
+    "roe": {
+        "include": ["净资产收益率", "ROE"],
+        "exclude": ["增长", "同比"],
+        "prefer": ["净资产收益率", "ROE"],
+    },
+    "debt_ratio": {
+        "include": ["资产负债率", "负债率"],
+        "exclude": ["增长", "同比"],
+        "prefer": ["资产负债率", "负债率"],
+    },
+}
+
+
+def _score_metric_name(
+    metric_name: str,
+    include: list[str],
+    exclude: list[str],
+    prefer: list[str],
+) -> int | None:
+    """Return preference score for a metric label, or None when label does not match."""
+    if not metric_name:
+        return None
+    if not any(label in metric_name for label in include):
+        return None
+    if any(label in metric_name for label in exclude):
+        return None
+
+    score = 10
+    for idx, preferred_label in enumerate(prefer):
+        if preferred_label in metric_name:
+            score = 100 - idx
+            break
+    return score
+
+
+def _pick_best_metric_names(df: pd.DataFrame, metric_col: str) -> dict[str, str]:
+    """Pick one best metric label per target metric key."""
+    picked_metrics: dict[str, tuple[int, str]] = {}
+    for _, row in df.iterrows():
+        metric_name = str(row.get(metric_col, "")).replace(" ", "")
+        for key, rule in _FINANCIAL_ROW_METRIC_SPEC.items():
+            score = _score_metric_name(
+                metric_name,
+                include=rule["include"],
+                exclude=rule["exclude"],
+                prefer=rule["prefer"],
+            )
+            if score is None:
+                continue
+            current = picked_metrics.get(key)
+            if current is None or score > current[0]:
+                picked_metrics[key] = (score, metric_name)
+    return {key: name for key, (_, name) in picked_metrics.items()}
+
+
 def _extract_financial_rows_metric_style(df: pd.DataFrame) -> list[dict[str, Any]]:
     """Handle metric-row format where first column is metric name and rest are report dates."""
     if df.empty:
@@ -114,55 +180,8 @@ def _extract_financial_rows_metric_style(df: pd.DataFrame) -> list[dict[str, Any
     date_cols = [col for col in cols if col != metric_col and to_date_str(col)]
     if not date_cols:
         return []
-
-    metric_spec = {
-        "revenue": {
-            "include": ["营业总收入", "营业收入", "主营业务收入"],
-            "exclude": ["增长", "同比", "每股", "占比"],
-            "prefer": ["营业总收入", "营业收入"],
-        },
-        "net_profit": {
-            "include": ["归母净利润", "净利润"],
-            "exclude": ["增长", "同比", "每股", "扣非", "现金流"],
-            "prefer": ["归母净利润", "净利润"],
-        },
-        "roe": {
-            "include": ["净资产收益率", "ROE"],
-            "exclude": ["增长", "同比"],
-            "prefer": ["净资产收益率", "ROE"],
-        },
-        "debt_ratio": {
-            "include": ["资产负债率", "负债率"],
-            "exclude": ["增长", "同比"],
-            "prefer": ["资产负债率", "负债率"],
-        },
-    }
-
-    picked_metrics: dict[str, tuple[int, str]] = {}
-    for _, row in df.iterrows():
-        metric_name = str(row.get(metric_col, "")).replace(" ", "")
-        if not metric_name:
-            continue
-        for key, rule in metric_spec.items():
-            include = rule["include"]
-            exclude = rule["exclude"]
-            prefer = rule["prefer"]
-            if not any(label in metric_name for label in include):
-                continue
-            if any(label in metric_name for label in exclude):
-                continue
-
-            score = 10
-            for idx, preferred_label in enumerate(prefer):
-                if preferred_label in metric_name:
-                    score = 100 - idx
-                    break
-
-            current = picked_metrics.get(key)
-            if current is None or score > current[0]:
-                picked_metrics[key] = (score, metric_name)
-
-    metric_name_to_key = {name: key for key, (_, name) in picked_metrics.items()}
+    best_metric_names = _pick_best_metric_names(df, metric_col)
+    metric_name_to_key = {name: key for key, name in best_metric_names.items()}
 
     values_by_date: dict[str, dict[str, float | None]] = {}
     for col in date_cols:
