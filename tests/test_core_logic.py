@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.core_logic import (
+    _compute_cagr,
+    _compute_yoy,
     compute_financial_report_analysis,
     compute_latest_close_percentile,
     compute_macro_signals,
@@ -255,3 +257,92 @@ def test_compute_financial_report_analysis_risk_case() -> None:
     assert payload["grade"] in {"C", "D"}
     assert payload["score"] <= 55
     assert any(item["level"] == "risk" for item in payload["highlights"])
+
+
+def test_growth_helpers_edge_cases() -> None:
+    assert _compute_yoy(10.0, None) is None
+    assert _compute_yoy(10.0, 0.0) is None
+    assert _compute_cagr([(2024, 100.0)]) is None
+    assert _compute_cagr([(2024, 100.0), (2024, 120.0)]) is None
+
+
+def test_compute_financial_report_analysis_skips_invalid_rows_and_missing_metric_highlights() -> None:
+    rows = [
+        {
+            "report_year": "bad-year",
+            "report_date": "2024-06-30",
+            "revenue": 99.0,
+            "net_profit": 8.0,
+            "roe": 10.0,
+            "debt_ratio": 55.0,
+        },
+        {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 100.0,
+            "net_profit": 10.0,
+            "roe": None,
+            "debt_ratio": None,
+        },
+    ]
+    payload = compute_financial_report_analysis(rows)
+    assert payload["latest_report_year"] == 2024
+    assert payload["series"] == [
+        {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 100.0,
+            "net_profit": 10.0,
+            "roe": None,
+            "debt_ratio": None,
+        }
+    ]
+
+    by_title = {item["title"]: item for item in payload["highlights"]}
+    assert by_title["Revenue trend"]["level"] == "info"
+    assert by_title["Profit trend"]["level"] == "info"
+    assert by_title["ROE quality"]["level"] == "info"
+    assert by_title["Leverage risk"]["level"] == "info"
+
+
+def test_compute_financial_report_analysis_grade_b_with_neutral_roe_and_moderate_debt() -> None:
+    rows = [
+        {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 90.0,
+            "net_profit": 12.0,
+            "roe": 10.0,
+            "debt_ratio": 60.0,
+        },
+        {
+            "report_year": 2023,
+            "report_date": "2023-12-31",
+            "revenue": 100.0,
+            "net_profit": 10.0,
+            "roe": 9.0,
+            "debt_ratio": 55.0,
+        },
+    ]
+    payload = compute_financial_report_analysis(rows)
+    assert payload["grade"] == "B"
+    assert payload["score"] == 70
+    by_title = {item["title"]: item for item in payload["highlights"]}
+    assert by_title["ROE quality"]["level"] == "warn"
+    assert by_title["Leverage risk"]["level"] == "warn"
+
+
+def test_compute_financial_report_analysis_grade_c_branch() -> None:
+    rows = [
+        {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 88.0,
+            "net_profit": 9.0,
+            "roe": 10.0,
+            "debt_ratio": 60.0,
+        }
+    ]
+    payload = compute_financial_report_analysis(rows)
+    assert payload["grade"] == "C"
+    assert payload["score"] == 55
