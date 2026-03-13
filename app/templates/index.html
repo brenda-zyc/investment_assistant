@@ -181,6 +181,55 @@
         margin-bottom: 10px;
       }
 
+      .accordion-card {
+        overflow: hidden;
+      }
+
+      .accordion-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .accordion-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--ink);
+        font-family: "Fira Sans", "PingFang SC", sans-serif;
+        font-size: 19px;
+        font-weight: 700;
+        padding: 0;
+        text-align: left;
+      }
+
+      .accordion-toggle:hover {
+        filter: none;
+      }
+
+      .accordion-toggle .chevron {
+        flex: 0 0 auto;
+        color: var(--ink-soft);
+        font-family: "Fira Code", monospace;
+        font-size: 14px;
+        transition: transform 0.2s ease;
+      }
+
+      .accordion-card.is-open .accordion-toggle .chevron {
+        transform: rotate(90deg);
+      }
+
+      .accordion-body[hidden] {
+        display: none;
+      }
+
       .card h2 {
         margin: 0;
         font-size: 19px;
@@ -372,6 +421,12 @@
         border-radius: 12px;
         overflow: auto;
         max-height: 430px;
+      }
+
+      .table-wrap.watchlist-wrap {
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: visible;
       }
 
       table {
@@ -585,9 +640,18 @@
               <div class="muted" id="realtimeStatus"></div>
             </div>
 
-            <div class="card">
-              <div class="card-head">
-                <h2>Price Data</h2>
+            <div class="card accordion-card is-open">
+              <div class="accordion-head">
+                <button
+                  class="accordion-toggle"
+                  type="button"
+                  data-accordion-toggle
+                  aria-expanded="true"
+                  aria-controls="priceAccordionBody"
+                >
+                  <span>Price Data</span>
+                  <span class="chevron" aria-hidden="true">></span>
+                </button>
                 <div class="row">
                   <label class="inline-label" for="priceLimitSelect">Rows</label>
                   <select id="priceLimitSelect">
@@ -598,60 +662,88 @@
                   </select>
                 </div>
               </div>
-              <div class="table-wrap">
-                <table id="priceTable">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Open</th>
-                      <th>Close</th>
-                      <th>High</th>
-                      <th>Low</th>
-                      <th>Volume</th>
-                      <th>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-              <div class="muted" id="priceMeta"></div>
-            </div>
-
-            <div class="card">
-              <h2>Financial Summary (5Y)</h2>
-              <div class="table-wrap">
-                <table id="financialTable">
-                  <thead>
-                    <tr>
-                      <th>Year</th>
-                      <th>Report Date</th>
-                      <th>Revenue</th>
-                      <th>Net Profit</th>
-                      <th>ROE (%)</th>
-                      <th>Debt Ratio (%)</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
+              <div id="priceAccordionBody" class="accordion-body">
+                <div class="table-wrap">
+                  <table id="priceTable">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Open</th>
+                        <th>Close</th>
+                        <th>High</th>
+                        <th>Low</th>
+                        <th>Volume</th>
+                        <th>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <div class="muted" id="priceMeta"></div>
               </div>
             </div>
 
-            <div class="card">
-              <h2>Metric Percentile Panel</h2>
-              <p>Current value and historical percentile for key valuation, quality, and growth metrics.</p>
-              <div class="table-wrap">
-                <table id="stockMetricTable">
-                  <thead>
-                    <tr>
-                      <th>Metric</th>
-                      <th>Current</th>
-                      <th>Percentile</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
+            <div class="card accordion-card">
+              <div class="accordion-head">
+                <button
+                  class="accordion-toggle"
+                  type="button"
+                  data-accordion-toggle
+                  aria-expanded="false"
+                  aria-controls="financialAccordionBody"
+                >
+                  <span>Financial Summary (5Y)</span>
+                  <span class="chevron" aria-hidden="true">></span>
+                </button>
               </div>
-              <div class="muted" id="stockMetricStatus"></div>
+              <div id="financialAccordionBody" class="accordion-body" hidden>
+                <div class="table-wrap">
+                  <table id="financialTable">
+                    <thead>
+                      <tr>
+                        <th>Year</th>
+                        <th>Report Date</th>
+                        <th>Revenue</th>
+                        <th>Net Profit</th>
+                        <th>ROE (%)</th>
+                        <th>Debt Ratio (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="card accordion-card">
+              <div class="accordion-head">
+                <button
+                  class="accordion-toggle"
+                  type="button"
+                  data-accordion-toggle
+                  aria-expanded="false"
+                  aria-controls="metricAccordionBody"
+                >
+                  <span>Metric Percentile Panel</span>
+                  <span class="chevron" aria-hidden="true">></span>
+                </button>
+              </div>
+              <div id="metricAccordionBody" class="accordion-body" hidden>
+                <p>Current value and historical percentile for key valuation, quality, and growth metrics.</p>
+                <div class="table-wrap">
+                  <table id="stockMetricTable">
+                    <thead>
+                      <tr>
+                        <th>Metric</th>
+                        <th>Current</th>
+                        <th>Percentile</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+                <div class="muted" id="stockMetricStatus"></div>
+              </div>
             </div>
           </div>
 
@@ -664,7 +756,7 @@
                 <button id="analyzeWatchlistBtn">Analyze Watchlist</button>
               </div>
               <div class="muted" id="watchlistStatus"></div>
-              <div class="table-wrap">
+              <div class="table-wrap watchlist-wrap">
                 <table id="watchlistTable">
                   <thead>
                     <tr>
@@ -1744,6 +1836,18 @@
         if (e.key === "Enter") analyzeSingleStock();
       });
       priceLimitSelect.addEventListener("change", () => renderPriceRows(currentPriceRows));
+      document.querySelectorAll("[data-accordion-toggle]").forEach((buttonEl) => {
+        buttonEl.addEventListener("click", () => {
+          const bodyId = buttonEl.getAttribute("aria-controls");
+          const bodyEl = bodyId ? document.getElementById(bodyId) : null;
+          const cardEl = buttonEl.closest(".accordion-card");
+          if (!bodyEl || !cardEl) return;
+          const isExpanded = buttonEl.getAttribute("aria-expanded") === "true";
+          buttonEl.setAttribute("aria-expanded", String(!isExpanded));
+          bodyEl.hidden = isExpanded;
+          cardEl.classList.toggle("is-open", !isExpanded);
+        });
+      });
 
       analyzeWatchlistBtn.addEventListener("click", analyzeWatchlist);
 
