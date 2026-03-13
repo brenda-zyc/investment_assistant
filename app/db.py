@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(__file__).resolve().parent.parent / "investment.db"
+SQLITE_TIMEOUT_SECONDS = 5.0
+SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 def _validate_table_name(table_name: str) -> None:
@@ -14,8 +16,10 @@ def _validate_table_name(table_name: str) -> None:
 
 def get_conn() -> sqlite3.Connection:
     """Create a SQLite connection with dict-like row access."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
+    # Keep write contention tolerable when bounded watchlist fan-out persists caches concurrently.
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     return conn
 
 

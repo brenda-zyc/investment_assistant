@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from app.core_logic import compute_latest_close_percentile, compute_stock_metrics
@@ -21,6 +22,9 @@ from app.services.market_data_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+WATCHLIST_MAX_SYMBOLS = 20
+WATCHLIST_MAX_WORKERS = 4
 
 
 def _deduplicate_codes(raw_codes: list[str]) -> list[str]:
@@ -93,8 +97,8 @@ def parse_symbols_input(symbols_text: str) -> list[str]:
     return unique_symbols
 
 
-def analyze_single_symbol(symbol: str) -> dict:
-    """Fetch and persist single-symbol data with cache fallback warnings."""
+def _fetch_cached_symbol_data(symbol: str) -> dict:
+    """Fetch and persist symbol history while preserving cached fallback warnings."""
     warnings: list[str] = []
 
     try:
@@ -123,6 +127,35 @@ def analyze_single_symbol(symbol: str) -> dict:
             )
             stored_financials = []
 
+    return {
+        "price_data": stored_prices,
+        "financial_summary": stored_financials,
+        "warnings": warnings,
+    }
+
+
+def _build_watchlist_snapshot(symbol: str) -> dict:
+    """Build one watchlist row without realtime or stock-name enrichment."""
+    analyzed = _fetch_cached_symbol_data(symbol)
+    latest_price = analyzed["price_data"][0] if analyzed["price_data"] else None
+    latest_financial = analyzed["financial_summary"][0] if analyzed["financial_summary"] else None
+    # Percentile calculation: latest close ranked against cached close history.
+    close_percentile = compute_latest_close_percentile(analyzed["price_data"])
+    return {
+        "symbol": symbol,
+        "symbol_name": None,
+        "latest_price": latest_price,
+        "latest_financial": latest_financial,
+        "close_percentile": close_percentile,
+        "realtime": None,
+        "warnings": analyzed["warnings"],
+    }
+
+
+def analyze_single_symbol(symbol: str) -> dict:
+    """Fetch and persist single-symbol data with cache fallback warnings."""
+    analyzed = _fetch_cached_symbol_data(symbol)
+
     symbol_name: str | None = None
     try:
         symbol_name = fetch_stock_names([symbol]).get(symbol) or None
@@ -143,52 +176,45 @@ def analyze_single_symbol(symbol: str) -> dict:
         "symbol": symbol,
         "symbol_name": symbol_name,
         "realtime": realtime_quote if realtime_quote else None,
-        "price_data": stored_prices,
-        "financial_summary": stored_financials,
-        "warnings": warnings,
+        "price_data": analyzed["price_data"],
+        "financial_summary": analyzed["financial_summary"],
+        "warnings": analyzed["warnings"],
     }
 
 
 def analyze_multi_symbols(raw_codes: list[str]) -> dict:
     """Analyze a watchlist and return latest snapshot per symbol."""
-    unique_codes = _deduplicate_codes(raw_codes)
-
-    results: list[dict] = []
-    successful_symbols: list[str] = []
+    unique_codes = _deduplicate_codes(raw_codes)[:WATCHLIST_MAX_SYMBOLS]
+    ordered_results: list[dict | None] = [None] * len(unique_codes)
+    indexed_valid_symbols: list[tuple[int, str]] = []
 
     # API assumption: watchlist endpoint enforces an upper bound to keep latency predictable.
-    for raw_code in unique_codes[:20]:
+    for index, raw_code in enumerate(unique_codes):
         try:
             symbol = normalize_stock_code(raw_code)
         except ValueError as exc:
-            results.append({"symbol": raw_code, "error": str(exc)})
+            ordered_results[index] = {"symbol": raw_code, "error": str(exc)}
             continue
+        indexed_valid_symbols.append((index, symbol))
 
-        try:
-            analyzed = analyze_single_symbol(symbol)
-            latest_price = analyzed["price_data"][0] if analyzed["price_data"] else None
-            latest_financial = analyzed["financial_summary"][0] if analyzed["financial_summary"] else None
-            # Percentile calculation: latest close ranked against cached close history.
-            close_percentile = compute_latest_close_percentile(analyzed["price_data"])
-            results.append(
-                {
-                    "symbol": symbol,
-                    "symbol_name": None,
-                    "latest_price": latest_price,
-                    "latest_financial": latest_financial,
-                    "close_percentile": close_percentile,
-                    "realtime": None,
-                    "warnings": analyzed["warnings"],
-                }
-            )
-            successful_symbols.append(symbol)
-        except RuntimeError as exc:
-            results.append({"symbol": symbol, "error": str(exc)})
+    if indexed_valid_symbols:
+        max_workers = min(WATCHLIST_MAX_WORKERS, len(indexed_valid_symbols))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(_build_watchlist_snapshot, symbol): (index, symbol)
+                for index, symbol in indexed_valid_symbols
+            }
+            for future in as_completed(future_map):
+                index, symbol = future_map[future]
+                try:
+                    ordered_results[index] = future.result()
+                except Exception as exc:
+                    ordered_results[index] = {"symbol": symbol, "error": str(exc)}
 
+    results = [item for item in ordered_results if item is not None]
+    successful_symbols = [item["symbol"] for item in results if not item.get("error")]
     _attach_stock_names(results, successful_symbols)
     _attach_realtime_snapshots(results, successful_symbols)
-
-    # TODO: Add bounded parallel fetch for large watchlists while preserving response order.
 
     return {"results": results}
 
