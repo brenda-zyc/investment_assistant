@@ -268,6 +268,10 @@
         border: 1px solid transparent;
       }
 
+      .status.has-detail {
+        cursor: help;
+      }
+
       .status.ok {
         color: #166534;
         background: #dcfce7;
@@ -958,12 +962,29 @@
         return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: digits })}%`;
       }
 
+      function escapeHtmlAttribute(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
       function isBackendUnreachable(err) {
         const message = String(err?.message || err || "").toLowerCase();
         return (
           err instanceof TypeError &&
           (message.includes("failed to fetch") || message.includes("networkerror") || message.includes("load failed"))
         );
+      }
+
+      async function parseJsonResponse(res, errorLabel = "Backend") {
+        const bodyText = await res.text();
+        try {
+          return bodyText ? JSON.parse(bodyText) : {};
+        } catch (_err) {
+          throw new Error(`${errorLabel} returned non-JSON response (HTTP ${res.status}).`);
+        }
       }
 
       function resetMetrics() {
@@ -1186,8 +1207,10 @@
             }),
             fetch(`${apiBase}/stock_metrics?symbol=${encodeURIComponent(code)}`),
           ]);
-          const data = await res.json();
-          const metricData = await metricRes.json();
+          const [data, metricData] = await Promise.all([
+            parseJsonResponse(res),
+            parseJsonResponse(metricRes, "Metrics endpoint"),
+          ]);
           if (!res.ok) throw new Error(data.detail || "Request failed");
           if (!metricRes.ok) throw new Error(metricData.detail || "Metric request failed");
 
@@ -1252,12 +1275,46 @@
         return uniq;
       }
 
-      function watchlistStatusBadge(item) {
+      function classifyWarningMessage(message) {
+        const text = String(message || "");
+        const lower = text.toLowerCase();
+        if (lower.includes("price fetch failed") && lower.includes("returned cached data")) {
+          return "Price data: cached fallback";
+        }
+        if (lower.includes("price fetch failed") && lower.includes("no cache available")) {
+          return "Price data: unavailable";
+        }
+        if (lower.includes("financial fetch failed") && lower.includes("returned cached data")) {
+          return "Financial data: cached fallback";
+        }
+        if (lower.includes("financial fetch failed") && lower.includes("no cache available")) {
+          return "Financial data: unavailable";
+        }
+        if (lower.includes("stock name fetch failed")) {
+          return "Stock name: unavailable";
+        }
+        if (lower.includes("realtime quote fetch failed")) {
+          return "Realtime quote: historical close used";
+        }
+        return text;
+      }
+
+      function buildWatchlistStatusDetail(item) {
         if (item.error) {
-          return `<span class="status bad">Error</span>`;
+          return `Error: ${item.error}`;
+        }
+        const warningDetails = [...new Set((item.warnings || []).map(classifyWarningMessage).filter(Boolean))];
+        return warningDetails.join("\n");
+      }
+
+      function watchlistStatusBadge(item) {
+        const detail = buildWatchlistStatusDetail(item);
+        const tooltip = escapeHtmlAttribute(detail);
+        if (item.error) {
+          return `<span class="status bad has-detail" title="${tooltip}" aria-label="${tooltip}" tabindex="0">Error</span>`;
         }
         if ((item.warnings || []).length) {
-          return `<span class="status warn">Warning</span>`;
+          return `<span class="status warn has-detail" title="${tooltip}" aria-label="${tooltip}" tabindex="0">Warning</span>`;
         }
         return `<span class="status ok">OK</span>`;
       }
@@ -1324,7 +1381,7 @@
         try {
           const url = `${apiBase}/api/realtime-prices?symbols=${encodeURIComponent(symbolPool.join(","))}`;
           const res = await fetch(url);
-          const data = await res.json();
+          const data = await parseJsonResponse(res);
           if (!res.ok) return;
           const quotes = data.quotes || {};
           if (currentSymbol && quotes[currentSymbol]) {
@@ -1346,6 +1403,8 @@
 
         analyzeWatchlistBtn.disabled = true;
         watchlistStatusEl.textContent = `Analyzing ${codes.length} symbols...`;
+        watchlistTableBody.innerHTML = "";
+        watchlistSymbols = [];
 
         try {
           const res = await fetch(`${apiBase}/api/analyze-multi`, {
@@ -1353,7 +1412,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ stock_codes: codes }),
           });
-          const data = await res.json();
+          const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
           const rows = data.results || [];
@@ -1384,7 +1443,7 @@
 
         try {
           const res = await fetch(`${apiBase}/api/financial-report-analysis?symbol=${encodeURIComponent(code)}`);
-          const data = await res.json();
+          const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
           renderFinancialReportSummary(data);
@@ -1424,7 +1483,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url }),
           });
-          const data = await res.json();
+          const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
           const analysis = data.analysis || {};
@@ -1627,8 +1686,10 @@
           const signalsUrl = `${apiBase}/macro_signals?table=${encodeURIComponent(table)}`;
 
           const [res, signalRes] = await Promise.all([fetch(rowsUrl), fetch(signalsUrl)]);
-          const data = await res.json();
-          const signalData = await signalRes.json();
+          const [data, signalData] = await Promise.all([
+            parseJsonResponse(res),
+            parseJsonResponse(signalRes, "Macro signals endpoint"),
+          ]);
           if (!res.ok) throw new Error(data.detail || "Request failed");
           if (!signalRes.ok) throw new Error(signalData.detail || "Signal request failed");
 
@@ -1661,13 +1722,7 @@
 
         try {
           const res = await fetch(`${apiBase}/industry_cycles?refresh=true`);
-          const bodyText = await res.text();
-          let data = {};
-          try {
-            data = bodyText ? JSON.parse(bodyText) : {};
-          } catch (_err) {
-            throw new Error(`Backend returned non-JSON response (HTTP ${res.status}).`);
-          }
+          const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
           const rows = flattenIndustryGroups(data);
           renderIndustryRows(rows);

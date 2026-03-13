@@ -123,3 +123,36 @@ def test_analyze_multi_symbols_deduplicates_before_worker_submission_and_respect
 
     assert len(payload["results"]) == market_usecase.WATCHLIST_MAX_SYMBOLS
     assert submitted_symbols == [f"{i:06d}" for i in range(market_usecase.WATCHLIST_MAX_SYMBOLS)]
+
+
+def test_analyze_single_symbol_keeps_warning_paths_after_cache_refactor(monkeypatch) -> None:
+    """Single-symbol flow should append warning text without crashing when optional feeds fail."""
+    monkeypatch.setattr(
+        market_usecase,
+        "_fetch_cached_symbol_data",
+        lambda _symbol: {
+            "price_data": [{"trade_date": "2026-03-13", "close": 10.0}],
+            "financial_summary": [{"report_year": 2025}],
+            "warnings": ["cached data"],
+        },
+    )
+
+    def raise_name_error(_symbols: list[str]) -> dict[str, str]:
+        raise RuntimeError("name source down")
+
+    def raise_realtime_error(_symbols: list[str]) -> dict[str, dict]:
+        raise RuntimeError("realtime source down")
+
+    monkeypatch.setattr(market_usecase, "fetch_stock_names", raise_name_error)
+    monkeypatch.setattr(market_usecase, "fetch_realtime_quotes", raise_realtime_error)
+
+    payload = market_usecase.analyze_single_symbol("000333")
+
+    assert payload["symbol"] == "000333"
+    assert payload["price_data"][0]["close"] == 10.0
+    assert payload["realtime"] is None
+    assert payload["warnings"] == [
+        "cached data",
+        "Stock name fetch failed. Reason: name source down",
+        "Realtime quote fetch failed; using historical latest close. Reason: realtime source down",
+    ]

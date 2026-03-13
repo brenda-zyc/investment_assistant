@@ -160,13 +160,13 @@ def analyze_single_symbol(symbol: str) -> dict:
     try:
         symbol_name = fetch_stock_names([symbol]).get(symbol) or None
     except Exception as exc:
-        warnings.append(f"Stock name fetch failed. Reason: {exc}")
+        analyzed["warnings"].append(f"Stock name fetch failed. Reason: {exc}")
 
     try:
         realtime_quote = fetch_realtime_quotes([symbol]).get(symbol, {})
     except Exception as exc:
         # API assumption: realtime quote API can fail independently from historical datasets.
-        warnings.append(f"Realtime quote fetch failed; using historical latest close. Reason: {exc}")
+        analyzed["warnings"].append(f"Realtime quote fetch failed; using historical latest close. Reason: {exc}")
         realtime_quote = {}
 
     if realtime_quote.get("name"):
