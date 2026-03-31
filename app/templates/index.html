@@ -580,6 +580,48 @@
         font-size: 13px;
       }
 
+      .report-answer-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .report-answer-title .status {
+        flex-shrink: 0;
+      }
+
+      .report-answer-evidence {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .report-answer-evidence li + li {
+        margin-top: 4px;
+      }
+
+      .report-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 10px 0;
+      }
+
+      .report-settings-card {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 10px;
+        margin-top: 10px;
+        margin-bottom: 10px;
+      }
+
+      .report-settings-card h3 {
+        margin-bottom: 6px;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         * {
           animation: none !important;
@@ -860,14 +902,36 @@
           <div class="row">
             <input id="reportCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Financial report symbol" />
             <button id="loadReportBtn">Load Financial Report</button>
+            <button id="autoReadReportBtn">Auto Read Annual Report</button>
           </div>
           <div class="row" style="margin-top: 8px">
             <input id="reportUrlInput" type="text" placeholder="https://... (财报网页链接)" aria-label="Financial report URL" />
             <button id="analyzeReportUrlBtn">Analyze Report URL</button>
           </div>
           <div class="tiny-note">支持中文网页链接（HTTP/HTTPS）和 PDF 文本解析。扫描版 PDF 暂不支持 OCR。</div>
+          <div class="report-settings-card">
+            <h3>LLM Settings</h3>
+            <div class="row">
+              <input id="llmProviderInput" type="text" value="deepseek" readonly aria-label="LLM provider" />
+              <input id="llmBaseUrlInput" type="text" placeholder="https://api.deepseek.com/v1" aria-label="LLM base URL" />
+              <input id="llmModelInput" type="text" placeholder="deepseek-chat" aria-label="LLM model" />
+            </div>
+            <div class="row" style="margin-top: 8px">
+              <input id="llmApiKeyInput" type="password" placeholder="DeepSeek API Key" aria-label="LLM API key" />
+              <button id="saveLlmSessionBtn">Save for this session</button>
+              <button id="testLlmConnectionBtn">Test Connection</button>
+            </div>
+            <div class="tiny-note">
+              配置会保存到浏览器 localStorage。点击 Save for this session 后，会同步到当前后端进程内存，不写入 SQLite。
+            </div>
+            <div class="muted" id="llmSessionStatus"></div>
+          </div>
           <div class="muted" id="reportStatus"></div>
           <div class="muted" id="reportSourceMeta"></div>
+          <div class="report-meta-row">
+            <div id="reportCurrentMode"></div>
+            <div id="reportLlmStatus"></div>
+          </div>
 
           <div class="report-summary-grid" aria-live="polite">
             <div class="report-kpi">
@@ -890,6 +954,10 @@
 
           <h3>Auto Analysis</h3>
           <div id="reportInsightList" class="report-insight-list"></div>
+          <h3>Three Questions</h3>
+          <div id="reportAutoreadList" class="report-insight-list"></div>
+          <h3>LLM Reading Notes</h3>
+          <div id="reportLlmAnalysis" class="report-insight-list"></div>
           <h3>Extraction Evidence</h3>
           <div id="reportEvidenceList" class="report-insight-list"></div>
 
@@ -965,15 +1033,27 @@
       const industryTableBody = document.querySelector("#industryTable tbody");
       const reportCodeInput = document.getElementById("reportCode");
       const loadReportBtn = document.getElementById("loadReportBtn");
+      const autoReadReportBtn = document.getElementById("autoReadReportBtn");
       const reportUrlInput = document.getElementById("reportUrlInput");
       const analyzeReportUrlBtn = document.getElementById("analyzeReportUrlBtn");
+      const llmProviderInput = document.getElementById("llmProviderInput");
+      const llmBaseUrlInput = document.getElementById("llmBaseUrlInput");
+      const llmModelInput = document.getElementById("llmModelInput");
+      const llmApiKeyInput = document.getElementById("llmApiKeyInput");
+      const saveLlmSessionBtn = document.getElementById("saveLlmSessionBtn");
+      const testLlmConnectionBtn = document.getElementById("testLlmConnectionBtn");
+      const llmSessionStatusEl = document.getElementById("llmSessionStatus");
       const reportStatusEl = document.getElementById("reportStatus");
       const reportSourceMetaEl = document.getElementById("reportSourceMeta");
+      const reportCurrentModeEl = document.getElementById("reportCurrentMode");
+      const reportLlmStatusEl = document.getElementById("reportLlmStatus");
       const reportMetricYearEl = document.getElementById("reportMetricYear");
       const reportMetricScoreEl = document.getElementById("reportMetricScore");
       const reportMetricRevenueYoyEl = document.getElementById("reportMetricRevenueYoy");
       const reportMetricProfitYoyEl = document.getElementById("reportMetricProfitYoy");
       const reportInsightListEl = document.getElementById("reportInsightList");
+      const reportAutoreadListEl = document.getElementById("reportAutoreadList");
+      const reportLlmAnalysisEl = document.getElementById("reportLlmAnalysis");
       const reportEvidenceListEl = document.getElementById("reportEvidenceList");
       const reportDetailTableBody = document.querySelector("#reportDetailTable tbody");
 
@@ -986,6 +1066,7 @@
       let macroLoadedOnce = false;
       let industryLoadedOnce = false;
       let reportLoadedOnce = false;
+      const llmStorageKey = "investmentAssistantLlmConfigV1";
       const macroTableLabelMap = {
         macro_indicators: "Production Macro (macro_indicators)",
         macro_indicators_step1: "Core Macro (5 indicators)",
@@ -1058,6 +1139,13 @@
         return String(value ?? "")
           .replace(/&/g, "&amp;")
           .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
           .replace(/>/g, "&gt;");
       }
@@ -1178,9 +1266,13 @@
         reportMetricRevenueYoyEl.textContent = "-";
         reportMetricProfitYoyEl.textContent = "-";
         reportInsightListEl.innerHTML = "";
+        reportAutoreadListEl.innerHTML = "";
+        reportLlmAnalysisEl.innerHTML = "";
         reportEvidenceListEl.innerHTML = "";
         reportDetailTableBody.innerHTML = "";
         reportSourceMetaEl.textContent = "";
+        renderReportCurrentMode(null);
+        renderReportLlmStatus({ llm_enabled: false, llm_used: false });
       }
 
       function renderFinancialReportSummary(payload) {
@@ -1242,6 +1334,189 @@
           `;
           reportDetailTableBody.appendChild(tr);
         });
+      }
+
+      function reportLevelBadge(level, verdict) {
+        if (level === "ok") {
+          return `<span class="status ok">${verdict}</span>`;
+        }
+        if (level === "warn") {
+          return `<span class="status warn">${verdict}</span>`;
+        }
+        if (level === "risk") {
+          return `<span class="status bad">${verdict}</span>`;
+        }
+        return `<span class="status">${verdict}</span>`;
+      }
+
+      function renderFinancialReportAutoreadAnswers(answers) {
+        reportAutoreadListEl.innerHTML = "";
+        (answers || []).forEach((item) => {
+          const div = document.createElement("div");
+          div.className = `report-insight-item ${item.level || "info"}`;
+          const evidenceItems = (item.evidence || []).map((line) => `<li>${line || "-"}</li>`).join("");
+          div.innerHTML = `
+            <div class="report-answer-title">
+              <div class="title">${item.question || "-"}</div>
+              ${reportLevelBadge(item.level || "info", item.verdict || "-")}
+            </div>
+            <div class="detail">${item.summary || "-"}</div>
+            ${evidenceItems ? `<ul class="report-answer-evidence">${evidenceItems}</ul>` : ""}
+          `;
+          reportAutoreadListEl.appendChild(div);
+        });
+      }
+
+      function renderReportCurrentMode(mode) {
+        const mapping = {
+          historical_fallback: { label: "Current mode: historical fallback", level: "warn" },
+          report_text_extracted: { label: "Current mode: report text extracted", level: "ok" },
+        };
+        const current = mapping[mode] || { label: "Current mode: -", level: "" };
+        reportCurrentModeEl.innerHTML = `<span class="status ${current.level}">${current.label}</span>`;
+      }
+
+      function renderReportLlmStatus(payload) {
+        if (payload?.llm_used) {
+          const modelText = payload.llm_model ? ` (${payload.llm_model})` : "";
+          reportLlmStatusEl.innerHTML = `<span class="status ok">LLM: enabled${modelText}</span>`;
+          return;
+        }
+        if (payload?.llm_enabled) {
+          reportLlmStatusEl.innerHTML = `<span class="status warn">LLM: configured, not used</span>`;
+          return;
+        }
+        reportLlmStatusEl.innerHTML = `<span class="status">LLM: off</span>`;
+      }
+
+      function renderReportLlmAnalysis(analysis) {
+        reportLlmAnalysisEl.innerHTML = "";
+        if (!analysis) return;
+
+        if (analysis.summary) {
+          const summaryEl = document.createElement("div");
+          summaryEl.className = "report-insight-item";
+          summaryEl.innerHTML = `
+            <div class="title">LLM Summary</div>
+            <div class="detail">${escapeHtml(analysis.summary)}</div>
+          `;
+          reportLlmAnalysisEl.appendChild(summaryEl);
+        }
+
+        (analysis.question_notes || []).forEach((item) => {
+          const evidenceItems = (item.evidence || [])
+            .map((line) => `<li>${escapeHtml(line || "-")}</li>`)
+            .join("");
+          const noteEl = document.createElement("div");
+          noteEl.className = "report-insight-item";
+          noteEl.innerHTML = `
+            <div class="title">${escapeHtml(item.question_id || "question_note")}</div>
+            <div class="detail">${escapeHtml(item.summary || "-")}</div>
+            ${evidenceItems ? `<ul class="report-answer-evidence">${evidenceItems}</ul>` : ""}
+          `;
+          reportLlmAnalysisEl.appendChild(noteEl);
+        });
+      }
+
+      function readLlmFormConfig() {
+        return {
+          provider: (llmProviderInput.value || "deepseek").trim(),
+          base_url: llmBaseUrlInput.value.trim(),
+          model: llmModelInput.value.trim(),
+          api_key: llmApiKeyInput.value.trim(),
+        };
+      }
+
+      function writeLlmFormConfig(config) {
+        const data = config || {};
+        llmProviderInput.value = data.provider || "deepseek";
+        llmBaseUrlInput.value = data.base_url || "https://api.deepseek.com/v1";
+        llmModelInput.value = data.model || "deepseek-chat";
+        llmApiKeyInput.value = data.api_key || "";
+      }
+
+      function persistLlmConfigToLocalStorage() {
+        localStorage.setItem(llmStorageKey, JSON.stringify(readLlmFormConfig()));
+      }
+
+      function hydrateLlmFormFromLocalStorage() {
+        try {
+          const raw = localStorage.getItem(llmStorageKey);
+          if (!raw) {
+            writeLlmFormConfig(null);
+            return;
+          }
+          writeLlmFormConfig(JSON.parse(raw));
+        } catch (_err) {
+          writeLlmFormConfig(null);
+        }
+      }
+
+      async function loadLlmSessionStatus() {
+        try {
+          const res = await fetch(`${apiBase}/api/llm/session-config`);
+          const data = await parseJsonResponse(res, "LLM session status endpoint");
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+          if (data.configured) {
+            llmSessionStatusEl.textContent = `Backend session ready: ${data.provider} / ${data.model} / ${data.api_key_masked}.`;
+          } else {
+            llmSessionStatusEl.textContent = "Backend session not configured yet.";
+          }
+        } catch (err) {
+          if (isBackendUnreachable(err)) {
+            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            llmSessionStatusEl.textContent = `Error: ${err.message}`;
+          }
+        }
+      }
+
+      async function saveLlmSessionConfig() {
+        persistLlmConfigToLocalStorage();
+        saveLlmSessionBtn.disabled = true;
+        llmSessionStatusEl.textContent = "Saving LLM session config...";
+        try {
+          const res = await fetch(`${apiBase}/api/llm/session-config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(readLlmFormConfig()),
+          });
+          const data = await parseJsonResponse(res, "LLM session config endpoint");
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+          llmSessionStatusEl.textContent = `Backend session ready: ${data.provider} / ${data.model} / ${data.api_key_masked}.`;
+        } catch (err) {
+          if (isBackendUnreachable(err)) {
+            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            llmSessionStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          saveLlmSessionBtn.disabled = false;
+        }
+      }
+
+      async function testLlmConnection() {
+        persistLlmConfigToLocalStorage();
+        testLlmConnectionBtn.disabled = true;
+        llmSessionStatusEl.textContent = "Testing LLM connection...";
+        try {
+          const res = await fetch(`${apiBase}/api/llm/test-connection`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(readLlmFormConfig()),
+          });
+          const data = await parseJsonResponse(res, "LLM test connection endpoint");
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+          llmSessionStatusEl.textContent = `LLM connection OK: ${data.provider} / ${data.model}.`;
+        } catch (err) {
+          if (isBackendUnreachable(err)) {
+            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            llmSessionStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          testLlmConnectionBtn.disabled = false;
+        }
       }
 
       function metricDisplayName(name) {
@@ -1531,6 +1806,7 @@
         }
 
         loadReportBtn.disabled = true;
+        resetFinancialReportPanel();
         reportStatusEl.textContent = "Loading financial reports...";
 
         try {
@@ -1567,6 +1843,7 @@
         }
 
         analyzeReportUrlBtn.disabled = true;
+        resetFinancialReportPanel();
         reportStatusEl.textContent = "Fetching and parsing report URL...";
 
         try {
@@ -1589,6 +1866,8 @@
             data.pdf_pages === null || data.pdf_pages === undefined ? "" : `PDF pages: ${data.pdf_pages}. `;
           const tlsText = data.tls_insecure ? "TLS: insecure fallback enabled. " : "";
           reportSourceMetaEl.textContent = `${sourceTitle}${pageText}${tlsText}Content-Type: ${data.content_type || "-"}.`;
+          renderReportCurrentMode(null);
+          renderReportLlmStatus({ llm_enabled: false, llm_used: false });
           reportStatusEl.textContent = `URL parsed successfully. As of: ${analysis.as_of || "-"}.`;
         } catch (err) {
           resetFinancialReportPanel();
@@ -1599,6 +1878,61 @@
           }
         } finally {
           analyzeReportUrlBtn.disabled = false;
+        }
+      }
+
+      async function autoReadAnnualReport() {
+        const code = reportCodeInput.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
+          return;
+        }
+
+        autoReadReportBtn.disabled = true;
+        resetFinancialReportPanel();
+        reportStatusEl.textContent = "Locating and reading the latest annual report...";
+
+        try {
+          const res = await fetch(`${apiBase}/api/financial-report-autoread?symbol=${encodeURIComponent(code)}`);
+          const data = await parseJsonResponse(res, "Financial report auto-read endpoint");
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          renderFinancialReportAutoreadAnswers(data.answers || []);
+          renderReportCurrentMode(data.current_mode || null);
+          renderReportLlmStatus(data);
+          renderReportLlmAnalysis(data.llm_analysis || null);
+
+          const reportTitle = data.report?.title ? `Title: ${escapeHtmlAttribute(data.report.title)}. ` : "";
+          const reportDate = data.report?.published_at
+            ? `Published: ${escapeHtmlAttribute(data.report.published_at)}. `
+            : "";
+          const reportPages =
+            data.report?.pdf_pages === null || data.report?.pdf_pages === undefined
+              ? ""
+              : `PDF pages: ${data.report.pdf_pages}. `;
+          const reportLink = data.report?.document_url || data.report?.detail_url;
+          const reportUrlHtml = reportLink
+            ? `Source: <a href="${escapeHtmlAttribute(reportLink)}" target="_blank" rel="noreferrer">Open report</a>.`
+            : "";
+          const reportMetaHtml = `${reportTitle}${reportDate}${reportPages}${reportUrlHtml}`;
+          if (reportMetaHtml.trim()) {
+            reportSourceMetaEl.innerHTML = reportMetaHtml;
+          } else {
+            reportSourceMetaEl.textContent =
+              "Report source metadata unavailable. The current three-question output is based on historical financial context fallback.";
+          }
+
+          const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
+          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          reportStatusEl.textContent = `Auto-read completed for ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
+        } catch (err) {
+          if (isBackendUnreachable(err)) {
+            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            reportStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          autoReadReportBtn.disabled = false;
         }
       }
 
@@ -1860,6 +2194,12 @@
       });
       loadIndustryBtn.addEventListener("click", loadIndustryCycles);
       loadReportBtn.addEventListener("click", loadFinancialReport);
+      autoReadReportBtn.addEventListener("click", autoReadAnnualReport);
+      saveLlmSessionBtn.addEventListener("click", saveLlmSessionConfig);
+      testLlmConnectionBtn.addEventListener("click", testLlmConnection);
+      [llmProviderInput, llmBaseUrlInput, llmModelInput, llmApiKeyInput].forEach((inputEl) => {
+        inputEl.addEventListener("input", persistLlmConfigToLocalStorage);
+      });
       reportCodeInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") loadFinancialReport();
       });
@@ -1869,7 +2209,9 @@
       });
 
       resetMetrics();
+      hydrateLlmFormFromLocalStorage();
       resetFinancialReportPanel();
+      loadLlmSessionStatus();
       loadMacroIndicators();
       macroLoadedOnce = true;
       // Poll realtime prices every 30 seconds; realtime values are not persisted.
