@@ -23,8 +23,13 @@ app = create_app()
 # Re-export route handlers for backward compatibility with local scripts.
 from app.api.financial_report_api import (  # noqa: E402,F401
     FinancialReportUrlRequest,
+    LlmSessionConfigRequest,
     financial_report_analysis,
+    financial_report_autoread,
     financial_report_url_analysis,
+    llm_session_config_save,
+    llm_session_config_status,
+    llm_test_connection,
 )
 from app.api.industry_api import industry_cycles  # noqa: E402,F401
 from app.api.macro_api import macro_indicators, macro_signals  # noqa: E402,F401

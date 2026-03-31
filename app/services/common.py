@@ -125,10 +125,12 @@ def to_date_str(value: Any) -> str | None:
 def _find_col(columns: list[str], candidates: list[str], exclude: list[str] | None = None) -> str | None:
     """Find the first column containing candidate keywords while avoiding exclusions."""
     exclude = exclude or []
+    lowered_exclude = [item.lower() for item in exclude]
+    lowered_candidates = [item.lower() for item in candidates]
     for col in columns:
-        col_clean = col.replace(" ", "")
-        if any(ex in col_clean for ex in exclude):
+        col_clean = col.replace(" ", "").lower()
+        if any(ex in col_clean for ex in lowered_exclude):
             continue
-        if any(keyword in col_clean for keyword in candidates):
+        if any(keyword in col_clean for keyword in lowered_candidates):
             return col
     return None

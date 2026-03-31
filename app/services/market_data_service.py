@@ -262,10 +262,32 @@ def fetch_financial_summary(stock_code: str) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _to_eastmoney_statement_symbol(stock_code: str) -> str:
+    """Convert a 6-digit stock code into the market-prefixed Eastmoney statement symbol."""
+    normalized = normalize_stock_code(stock_code)
+    if normalized.startswith(("6", "9")):
+        return f"SH{normalized}"
+    if normalized.startswith(("8", "4")):
+        return f"BJ{normalized}"
+    return f"SZ{normalized}"
+
+
+def _series_from_financial_rows(rows: list[dict[str, Any]], metric_key: str) -> list[tuple[str, float]]:
+    """Build an ascending date/value series from normalized annual financial rows."""
+    points: list[tuple[str, float]] = []
+    for row in rows:
+        report_date = to_date_str(row.get("report_date"))
+        value = to_float(row.get(metric_key))
+        if not report_date or value is None:
+            continue
+        points.append((report_date, value))
+    return _dedupe_points(points)
+
+
 def _find_date_col(df: pd.DataFrame) -> str | None:
     """Locate the most likely date column in an upstream dataframe."""
     cols = [str(c) for c in df.columns]
-    return _find_col(cols, ["日期", "date", "报告期", "报告日期", "截止日期", "trade_date"])
+    return _find_col(cols, ["日期", "date", "report_date", "报告期", "报告日期", "截止日期", "trade_date"])
 
 
 def _extract_series_from_row_style(
@@ -543,6 +565,89 @@ def fetch_financial_metric_series(stock_code: str) -> dict[str, list[tuple[str, 
         len(out["revenue"]),
     )
     return out
+
+
+def _fetch_statement_series(
+    endpoint_name: str,
+    fetcher,
+    metric_specs: dict[str, tuple[list[str], list[str]]],
+) -> dict[str, list[tuple[str, float]]]:
+    """Fetch one statement dataframe and extract normalized metric series from matching columns."""
+    try:
+        logger.info("report_autoread endpoint=%s", endpoint_name)
+        df = _call_with_resilience(fetcher)
+    except Exception as exc:
+        logger.warning("report_autoread endpoint=%s failed=%s", endpoint_name, exc)
+        return {key: [] for key in metric_specs}
+
+    if df is None or df.empty:
+        return {key: [] for key in metric_specs}
+
+    out: dict[str, list[tuple[str, float]]] = {}
+    for metric_key, (include_keywords, exclude_keywords) in metric_specs.items():
+        out[metric_key] = _dedupe_points(
+            _extract_series_from_row_style(df, include_keywords, exclude_keywords)
+        )
+    return out
+
+
+def fetch_report_assessment_context(stock_code: str) -> dict[str, list[tuple[str, float]]]:
+    """Fetch normalized historical context for autonomous annual-report assessment."""
+    summary_rows = fetch_financial_summary(stock_code)
+    eastmoney_symbol = _to_eastmoney_statement_symbol(stock_code)
+
+    profit_metric_specs = {
+        "deducted_net_profit": (
+            [
+                "扣除非经常性损益后的净利润",
+                "扣除非经常性损益净利润",
+                "扣非净利润",
+                "deduct_parent_netprofit",
+            ],
+            ["增长", "同比", "每股"],
+        ),
+    }
+    cash_flow_metric_specs = {
+        "operating_cash_flow": (
+            [
+                "经营活动产生的现金流量净额",
+                "经营现金流量净额",
+                "经营活动现金流净额",
+                "netcash_operate",
+            ],
+            ["同比", "增长"],
+        ),
+        "capex_cash_outflow": (
+            [
+                "购建固定资产、无形资产和其他长期资产支付的现金",
+                "购建固定资产无形资产和其他长期资产支付的现金",
+                "资本开支",
+                "construct_long_asset",
+            ],
+            ["同比", "增长"],
+        ),
+    }
+
+    profit_series = _fetch_statement_series(
+        "stock_profit_sheet_by_yearly_em",
+        lambda: ak.stock_profit_sheet_by_yearly_em(symbol=eastmoney_symbol),
+        profit_metric_specs,
+    )
+    cash_flow_series = _fetch_statement_series(
+        "stock_cash_flow_sheet_by_yearly_em",
+        lambda: ak.stock_cash_flow_sheet_by_yearly_em(symbol=eastmoney_symbol),
+        cash_flow_metric_specs,
+    )
+
+    return {
+        "revenue": _series_from_financial_rows(summary_rows, "revenue"),
+        "net_profit": _series_from_financial_rows(summary_rows, "net_profit"),
+        "roe": _series_from_financial_rows(summary_rows, "roe"),
+        "debt_ratio": _series_from_financial_rows(summary_rows, "debt_ratio"),
+        "deducted_net_profit": profit_series.get("deducted_net_profit", []),
+        "operating_cash_flow": cash_flow_series.get("operating_cash_flow", []),
+        "capex_cash_outflow": cash_flow_series.get("capex_cash_outflow", []),
+    }
 
 
 def build_revenue_cagr_5y_series(revenue_points: list[tuple[str, float]]) -> list[tuple[str, float]]:

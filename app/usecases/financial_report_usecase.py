@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import datetime as dt
 
-from app.core_logic import compute_financial_report_analysis
+from app.core_logic import compute_financial_report_analysis, compute_financial_report_autoread_assessment
 from app.db import fetch_financial_reports, upsert_financial_reports
 from app.services.financial_report_service import (
+    extract_report_assessment_metrics,
     extract_financial_row_from_report_text,
     fetch_report_text_from_url,
+    find_latest_annual_report,
 )
-from app.services.market_data_service import fetch_financial_summary, fetch_stock_names
+from app.services.llm_service import get_effective_llm_config, interpret_annual_report_text
+from app.services.market_data_service import (
+    fetch_financial_summary,
+    fetch_report_assessment_context,
+    fetch_stock_names,
+)
 
 
 def get_financial_report_analysis(symbol: str) -> dict:
@@ -97,4 +104,118 @@ def analyze_financial_report_url(url: str) -> dict:
         "tls_insecure": fetched.get("tls_insecure"),
         "analysis": analysis_payload,
         "extracted": extracted,
+    }
+
+
+def _latest_as_of_date(
+    extracted_metrics: dict | None,
+    historical_context: dict[str, list[tuple[str, float]]] | None,
+) -> str | None:
+    """Return the latest available as-of date across extracted and historical data."""
+    candidates: list[str] = []
+    report_date = extracted_metrics.get("report_date") if extracted_metrics else None
+    if report_date:
+        candidates.append(str(report_date))
+    for points in (historical_context or {}).values():
+        if points:
+            candidates.append(str(points[-1][0]))
+    return max(candidates) if candidates else None
+
+
+def _has_usable_report_metrics(extracted_metrics: dict | None) -> bool:
+    """Return whether the fetched report text yielded at least one usable core metric."""
+    if not extracted_metrics:
+        return False
+    for key in (
+        "revenue",
+        "net_profit",
+        "roe",
+        "deducted_net_profit",
+        "operating_cash_flow",
+        "capex_cash_outflow",
+    ):
+        if extracted_metrics.get(key) is not None:
+            return True
+    return False
+
+
+def autonomous_financial_report_read(symbol: str) -> dict:
+    """Autonomously locate and analyze the latest annual report for a stock symbol."""
+    warnings: list[str] = []
+
+    symbol_name: str | None = None
+    try:
+        symbol_name = fetch_stock_names([symbol]).get(symbol) or None
+    except Exception as exc:
+        warnings.append(f"Stock name fetch failed. Reason: {exc}")
+
+    report_meta: dict | None = None
+    fetched_report: dict | None = None
+    extracted_metrics: dict | None = None
+    try:
+        report_meta = find_latest_annual_report(symbol)
+    except Exception as exc:
+        warnings.append(f"Annual report discovery failed. Reason: {exc}")
+
+    if report_meta:
+        target_url = report_meta.get("document_url") or report_meta.get("detail_url")
+        try:
+            fetched_report = fetch_report_text_from_url(target_url)
+            extracted_metrics = extract_report_assessment_metrics(
+                fetched_report["text"],
+                title=(report_meta or {}).get("title") or fetched_report.get("title"),
+            )
+            warnings.extend(extracted_metrics.get("warnings", []))
+        except Exception as exc:
+            warnings.append(f"Annual report fetch or parse failed. Reason: {exc}")
+
+    historical_context: dict[str, list[tuple[str, float]]] = {}
+    try:
+        historical_context = fetch_report_assessment_context(symbol)
+    except Exception as exc:
+        warnings.append(f"Historical report context fetch failed. Reason: {exc}")
+
+    assessment = compute_financial_report_autoread_assessment(extracted_metrics, historical_context)
+    current_mode = "report_text_extracted" if _has_usable_report_metrics(extracted_metrics) else "historical_fallback"
+    llm_config = get_effective_llm_config()
+    llm_used = False
+    llm_analysis: dict | None = None
+    if fetched_report and fetched_report.get("text") and llm_config:
+        try:
+            llm_analysis = interpret_annual_report_text(
+                symbol=symbol,
+                symbol_name=symbol_name,
+                report_title=(report_meta or {}).get("title"),
+                report_text=fetched_report["text"],
+                current_mode=current_mode,
+            )
+            llm_used = True
+        except Exception as exc:
+            warnings.append(f"LLM interpretation failed. Reason: {exc}")
+    # TODO: Add optional LLM synthesis when a model provider is configured in this repo.
+    return {
+        "symbol": symbol,
+        "symbol_name": symbol_name,
+        "analysis_mode": "rule_based",
+        "current_mode": current_mode,
+        "llm_enabled": bool(llm_config),
+        "llm_used": llm_used,
+        "llm_provider": llm_config.get("provider") if llm_config else None,
+        "llm_model": llm_config.get("model") if llm_config else None,
+        "llm_analysis": llm_analysis,
+        "as_of": _latest_as_of_date(extracted_metrics, historical_context),
+        "report": {
+            "title": report_meta.get("title") if report_meta else None,
+            "published_at": report_meta.get("published_at") if report_meta else None,
+            "detail_url": report_meta.get("detail_url") if report_meta else None,
+            "document_url": report_meta.get("document_url") if report_meta else None,
+            "content_type": fetched_report.get("content_type") if fetched_report else None,
+            "pdf_pages": fetched_report.get("pdf_pages") if fetched_report else None,
+            "tls_insecure": fetched_report.get("tls_insecure") if fetched_report else None,
+        },
+        "extracted_metrics": extracted_metrics or {},
+        "historical_context": historical_context,
+        "answers": assessment.get("answers", []),
+        "derived_metrics": assessment.get("derived_metrics", {}),
+        "warnings": warnings,
     }

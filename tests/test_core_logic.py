@@ -4,6 +4,7 @@ from app.core_logic import (
     _compute_cagr,
     _compute_yoy,
     compute_financial_report_analysis,
+    compute_financial_report_autoread_assessment,
     compute_latest_close_percentile,
     compute_macro_signals,
     compute_percentile_from_points,
@@ -257,6 +258,43 @@ def test_compute_financial_report_analysis_risk_case() -> None:
     assert payload["grade"] in {"C", "D"}
     assert payload["score"] <= 55
     assert any(item["level"] == "risk" for item in payload["highlights"])
+
+
+def test_compute_financial_report_autoread_assessment_positive_case() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={
+            "revenue": 100.0,
+            "net_profit": 10.0,
+            "deducted_net_profit": 9.0,
+            "operating_cash_flow": 12.0,
+            "roe": 16.0,
+            "capex_cash_outflow": 3.0,
+        },
+        historical_context={
+            "revenue": [("2022-12-31", 80.0), ("2023-12-31", 90.0), ("2024-12-31", 100.0)],
+            "net_profit": [("2022-12-31", 7.0), ("2023-12-31", 8.0), ("2024-12-31", 10.0)],
+            "roe": [("2024-12-31", 16.0)],
+            "deducted_net_profit": [("2024-12-31", 9.0)],
+            "operating_cash_flow": [("2024-12-31", 12.0)],
+            "capex_cash_outflow": [("2024-12-31", 3.0)],
+        },
+    )
+
+    assert len(payload["answers"]) == 3
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert answer_map["profit_authenticity"]["level"] == "ok"
+    assert answer_map["profit_sustainability"]["level"] == "ok"
+    assert answer_map["capital_intensity"]["verdict"] == "资本投入压力较低"
+    assert payload["derived_metrics"]["cash_conversion"] == 1.2
+    assert payload["derived_metrics"]["recurring_profit_ratio"] == 0.9
+
+
+def test_compute_financial_report_autoread_assessment_insufficient_case() -> None:
+    payload = compute_financial_report_autoread_assessment(latest_report_metrics={}, historical_context={})
+
+    assert len(payload["answers"]) == 3
+    assert all(item["verdict"] == "数据不足" for item in payload["answers"])
+    assert payload["derived_metrics"]["cash_conversion"] is None
 
 
 def test_growth_helpers_edge_cases() -> None:
