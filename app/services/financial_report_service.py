@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import io
+import json
 import os
 import re
 import shutil
@@ -10,6 +11,7 @@ import ssl
 import subprocess
 import tempfile
 from typing import Any
+from urllib.parse import urlencode, urljoin
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -29,6 +31,12 @@ _HTTP_USER_AGENT = (
 _METRIC_NUM_RE = re.compile(r"([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*(亿|万|元|%)?")
 _SNIPPET_LEFT_CHARS = 20
 _SNIPPET_RIGHT_CHARS = 120
+_CNINFO_STOCK_MAP_URL = "http://www.cninfo.com.cn/new/data/szse_stock.json"
+_CNINFO_DISCLOSURE_QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+_CNINFO_DISCLOSURE_DETAIL_BASE_URL = "http://www.cninfo.com.cn/new/disclosure/detail"
+_CNINFO_STATIC_BASE_URL = "http://static.cninfo.com.cn/"
+_CNINFO_FULL_YEAR_EXCLUDE_TOKENS = ("摘要", "英文", "取消", "问询", "回复", "更正", "提示性公告")
+_PDF_STRUCTURE_MARKERS = ("%pdf-", "endobj", "stream", "endstream", "xref", "trailer", "/type/", "/catalog")
 
 
 def _decode_http_bytes(raw: bytes, content_type: str) -> str:
@@ -78,6 +86,24 @@ def _is_ssl_verify_error(exc: Exception) -> bool:
     return "certificate verify failed" in str(exc).lower()
 
 
+def _is_readable_pdf_text(text: str) -> bool:
+    """Return whether extracted PDF text looks like readable report content instead of PDF source."""
+    cleaned = (text or "").replace("\x00", "").strip()
+    if len(cleaned) < 40:
+        return False
+
+    head = cleaned[:4000].lower()
+    # Data cleaning rule: reject parser outputs that still look like raw PDF objects/streams.
+    marker_hits = sum(1 for marker in _PDF_STRUCTURE_MARKERS if marker in head)
+    if head.startswith("%pdf-"):
+        return False
+    if marker_hits >= 4:
+        return False
+    if re.search(r"\b\d+\s+\d+\s+obj\b", head) and "endobj" in head:
+        return False
+    return True
+
+
 def _extract_pdf_text(raw: bytes, max_pages: int = 120) -> tuple[str, int]:
     """Extract plain text from a PDF byte stream."""
     pypdf_error: str | None = None
@@ -99,9 +125,9 @@ def _extract_pdf_text(raw: bytes, max_pages: int = 120) -> tuple[str, int]:
             text = text.replace("\u3000", " ")
             text = re.sub(r"[ \t\r\f\v]+", " ", text)
             text = re.sub(r"\n{2,}", "\n", text).strip()
-            if len(text) >= 40:
+            if _is_readable_pdf_text(text):
                 return text, page_count
-            pypdf_error = "pypdf extracted too little text"
+            pypdf_error = "pypdf extracted unreadable PDF structure output"
         except Exception as exc:
             pypdf_error = str(exc)
 
@@ -123,8 +149,8 @@ def _extract_pdf_text(raw: bytes, max_pages: int = 120) -> tuple[str, int]:
             text = proc.stdout.replace("\u3000", " ")
             text = re.sub(r"[ \t\r\f\v]+", " ", text)
             text = re.sub(r"\n{2,}", "\n", text).strip()
-            if len(text) < 40:
-                raise RuntimeError("textutil extracted too little text")
+            if not _is_readable_pdf_text(text):
+                raise RuntimeError("textutil extracted unreadable PDF structure output")
 
             page_count = max(1, text.count("\f") + 1)
             return text, page_count
@@ -157,6 +183,201 @@ def _parse_mb_env(name: str, default_mb: int) -> int:
     except ValueError:
         return default_mb
     return max(1, value)
+
+
+def _decode_json_bytes(raw: bytes, content_type: str) -> dict[str, Any]:
+    """Decode a JSON response body using the repo's Chinese-safe text decoder."""
+    text = _decode_http_bytes(raw, content_type)
+    return json.loads(text)
+
+
+def _build_report_text_body(text: str, title: str | None = None) -> tuple[str, int | None, str | None]:
+    """Normalize report text into one searchable body and infer report date metadata."""
+    body = (title or "") + "\n" + (text or "")
+    body = re.sub(r"\s+", " ", body)
+
+    title_year_match = re.search(r"(20\d{2})\s*年\s*年度报告", str(title or ""))
+    year_candidates = [int(item) for item in re.findall(r"(20\d{2})\s*年", body)]
+    date_match = re.search(r"(20\d{2})\s*[年\-/.]\s*(\d{1,2})\s*[月\-/.]\s*(\d{1,2})\s*日?", body)
+
+    report_year = int(title_year_match.group(1)) if title_year_match else None
+    if report_year is None:
+        report_year = max(year_candidates) if year_candidates else None
+    report_date: str | None = None
+    if title_year_match and report_year is not None:
+        # Financial logic: annual-report titles identify the operating year, not the publication date.
+        report_date = f"{report_year}-12-31"
+    elif date_match:
+        year = int(date_match.group(1))
+        month = int(date_match.group(2))
+        day = int(date_match.group(3))
+        report_year = report_year or year
+        try:
+            report_date = dt.date(year, month, day).isoformat()
+        except ValueError:
+            report_date = None
+    elif report_year is not None:
+        report_date = f"{report_year}-12-31"
+
+    return body, report_year, report_date
+
+
+def _load_cninfo_symbol_org_map(timeout_sec: int = 12) -> dict[str, str]:
+    """Load CNInfo stock-code to org-id mapping for report disclosure queries."""
+    req = Request(_CNINFO_STOCK_MAP_URL, headers={"User-Agent": _HTTP_USER_AGENT})
+    with urlopen(req, timeout=timeout_sec) as resp:  # nosec B310 - fixed trusted host for public disclosure data
+        payload = _decode_json_bytes(resp.read(), str(resp.headers.get("Content-Type", "")))
+    out: dict[str, str] = {}
+    for item in payload.get("stockList", []):
+        code = str(item.get("code", "")).strip()
+        org_id = str(item.get("orgId", "")).strip()
+        if code and org_id:
+            out[code] = org_id
+    return out
+
+
+def _post_cninfo_disclosure_query(payload: dict[str, str], timeout_sec: int = 12) -> dict[str, Any]:
+    """Submit one CNInfo disclosure query request and return the parsed JSON payload."""
+    data = urlencode(payload).encode("utf-8")
+    headers = {
+        "User-Agent": _HTTP_USER_AGENT,
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Origin": "http://www.cninfo.com.cn",
+        "Referer": "http://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search",
+    }
+    req = Request(_CNINFO_DISCLOSURE_QUERY_URL, data=data, headers=headers, method="POST")
+    with urlopen(req, timeout=timeout_sec) as resp:  # nosec B310 - fixed trusted host for public disclosure data
+        return _decode_json_bytes(resp.read(), str(resp.headers.get("Content-Type", "")))
+
+
+def _build_cninfo_report_links(
+    symbol: str,
+    org_id: str,
+    announcement_id: str,
+    announcement_time: str,
+    adjunct_url: str | None,
+) -> tuple[str, str | None]:
+    """Build CNInfo detail and direct-document links for one disclosure entry."""
+    query = urlencode(
+        {
+            "stockCode": symbol,
+            "announcementId": announcement_id,
+            "orgId": org_id,
+            "announcementTime": announcement_time,
+        }
+    )
+    detail_url = f"{_CNINFO_DISCLOSURE_DETAIL_BASE_URL}?{query}"
+
+    document_url = None
+    cleaned_adjunct = str(adjunct_url or "").strip()
+    if cleaned_adjunct:
+        document_url = urljoin(_CNINFO_STATIC_BASE_URL, cleaned_adjunct.lstrip("/"))
+    return detail_url, document_url
+
+
+def _score_annual_report_candidate(title: str, published_at: str) -> tuple[int, str, str]:
+    """Score one annual-report candidate so the latest full report wins over summaries or notices."""
+    normalized_title = str(title or "").replace(" ", "")
+    normalized_date = str(published_at or "")
+    score = 0
+    if "年度报告" in normalized_title:
+        score += 60
+    if "年度报告全文" in normalized_title:
+        score += 20
+    if any(token in normalized_title for token in _CNINFO_FULL_YEAR_EXCLUDE_TOKENS):
+        score -= 120
+    if "公告" in normalized_title and "年度报告" not in normalized_title:
+        score -= 40
+    return score, normalized_date, normalized_title
+
+
+def select_latest_annual_report(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the latest full annual report candidate from disclosure search results."""
+    if not candidates:
+        return None
+
+    best = max(
+        candidates,
+        key=lambda item: _score_annual_report_candidate(
+            title=str(item.get("title", "")),
+            published_at=str(item.get("published_at", "")),
+        ),
+    )
+    best_score, _, _ = _score_annual_report_candidate(
+        title=str(best.get("title", "")),
+        published_at=str(best.get("published_at", "")),
+    )
+    if best_score < 0:
+        return None
+    return best
+
+
+def find_latest_annual_report(symbol: str, start_year: int | None = None, end_year: int | None = None) -> dict[str, Any]:
+    """Find the latest full annual report disclosure entry for a stock symbol."""
+    today = dt.date.today()
+    query_end_year = end_year or today.year
+    query_start_year = start_year or max(query_end_year - 3, 2000)
+
+    org_map = _load_cninfo_symbol_org_map()
+    org_id = org_map.get(symbol)
+    if not org_id:
+        raise RuntimeError(f"Could not resolve CNInfo orgId for symbol {symbol}.")
+
+    payload = {
+        "pageNum": "1",
+        "pageSize": "30",
+        "column": "szse",
+        "tabName": "fulltext",
+        "plate": "",
+        "stock": f"{symbol},{org_id}",
+        "searchkey": "",
+        "secid": "",
+        "category": "category_ndbg_szsh",
+        "trade": "",
+        "seDate": f"{query_start_year}-01-01~{query_end_year}-12-31",
+        "sortName": "",
+        "sortType": "",
+        "isHLtitle": "true",
+    }
+    result = _post_cninfo_disclosure_query(payload)
+
+    candidates: list[dict[str, Any]] = []
+    for item in result.get("announcements", []):
+        title = str(item.get("announcementTitle", "")).strip()
+        published_at = ""
+        raw_ts = item.get("announcementTime")
+        try:
+            if raw_ts is not None:
+                published_at = dt.datetime.fromtimestamp(float(raw_ts) / 1000, tz=dt.timezone.utc).astimezone(
+                    dt.timezone(dt.timedelta(hours=8))
+                ).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            published_at = ""
+        announcement_id = str(item.get("announcementId", "")).strip()
+        detail_url, document_url = _build_cninfo_report_links(
+            symbol=symbol,
+            org_id=str(item.get("orgId", org_id)).strip() or org_id,
+            announcement_id=announcement_id,
+            announcement_time=published_at,
+            adjunct_url=str(item.get("adjunctUrl", "")).strip() or None,
+        )
+        candidates.append(
+            {
+                "symbol": symbol,
+                "title": title,
+                "published_at": published_at,
+                "detail_url": detail_url,
+                "document_url": document_url,
+                "announcement_id": announcement_id or None,
+                "source": "cninfo",
+            }
+        )
+
+    selected = select_latest_annual_report(candidates)
+    if not selected:
+        raise RuntimeError(f"No full annual report was found for symbol {symbol}.")
+    return selected
 
 
 def fetch_report_text_from_url(
@@ -271,8 +492,11 @@ def _is_candidate_valid(metric_name: str, unit: str, value: float, require_perce
     # Data cleaning rule: plain 4-digit values are commonly years, not financial metrics.
     if unit == "" and 1900 <= value <= 2100:
         return False
-    # Financial logic: revenue/net-profit candidates should not come from percentage values.
-    if metric_name in {"revenue", "net_profit"} and unit == "%":
+    # Financial logic: unitless cash-flow table cells are often local row fragments without the table header unit.
+    if metric_name in {"operating_cash_flow", "capex_cash_outflow"} and unit == "":
+        return False
+    # Financial logic: amount metrics should not come from percentage values.
+    if metric_name not in {"roe", "debt_ratio"} and unit == "%":
         return False
     if require_percent and unit != "%":
         return False
@@ -286,6 +510,8 @@ def _score_candidate(
     value: float,
     require_percent: bool,
     prefer_large_amount: bool,
+    prefer_after_keyword: bool,
+    is_after_keyword: bool,
 ) -> float:
     """Score one candidate value near a keyword; higher is better."""
     # Percentile-like ranking principle: score combines proximity + domain-specific priors.
@@ -298,6 +524,8 @@ def _score_candidate(
         score += 18
     if prefer_large_amount and unit == "" and abs(value) < 1000:
         score -= 15
+    if prefer_after_keyword:
+        score += 12 if is_after_keyword else -12
     return score
 
 
@@ -330,6 +558,7 @@ def _best_metric_match(
     metric_name: str,
     require_percent: bool = False,
     prefer_large_amount: bool = False,
+    prefer_after_keyword: bool = False,
 ) -> tuple[float | None, dict[str, Any] | None]:
     """Find best nearby numeric value around a metric keyword."""
     best: tuple[float, float, dict[str, Any]] | None = None
@@ -348,13 +577,16 @@ def _best_metric_match(
                 if not _is_candidate_valid(metric_name, unit, value, require_percent):
                     continue
 
-                distance = abs((snippet_start + num_match.start()) - kw_start)
+                absolute_start = snippet_start + num_match.start()
+                distance = abs(absolute_start - kw_start)
                 score = _score_candidate(
                     distance=distance,
                     unit=unit,
                     value=value,
                     require_percent=require_percent,
                     prefer_large_amount=prefer_large_amount,
+                    prefer_after_keyword=prefer_after_keyword,
+                    is_after_keyword=absolute_start >= kw_start,
                 )
                 evidence = _build_candidate_evidence(
                     metric_name=metric_name,
@@ -378,25 +610,7 @@ def _best_metric_match(
 
 def extract_financial_row_from_report_text(text: str, title: str | None = None) -> dict[str, Any]:
     """Extract annual financial metrics from Chinese report-like text."""
-    body = (title or "") + "\n" + (text or "")
-    body = re.sub(r"\s+", " ", body)
-
-    year_candidates = [int(item) for item in re.findall(r"(20\d{2})\s*年", body)]
-    date_match = re.search(r"(20\d{2})\s*[年\-/.]\s*(\d{1,2})\s*[月\-/.]\s*(\d{1,2})\s*日?", body)
-
-    report_year = max(year_candidates) if year_candidates else None
-    report_date: str | None = None
-    if date_match:
-        year = int(date_match.group(1))
-        month = int(date_match.group(2))
-        day = int(date_match.group(3))
-        report_year = report_year or year
-        try:
-            report_date = dt.date(year, month, day).isoformat()
-        except ValueError:
-            report_date = None
-    elif report_year is not None:
-        report_date = f"{report_year}-12-31"
+    body, report_year, report_date = _build_report_text_body(text=text, title=title)
 
     revenue, revenue_evidence = _best_metric_match(
         body,
@@ -418,7 +632,7 @@ def extract_financial_row_from_report_text(text: str, title: str | None = None) 
     )
     debt_ratio, debt_evidence = _best_metric_match(
         body,
-        keywords=["资产负债率", "负债率"],
+        keywords=["资产负债率"],
         metric_name="debt_ratio",
         require_percent=True,
     )
@@ -445,4 +659,77 @@ def extract_financial_row_from_report_text(text: str, title: str | None = None) 
         "debt_ratio": debt_ratio,
         "evidence": evidence,
         "warnings": warnings,
+    }
+
+
+def extract_report_assessment_metrics(text: str, title: str | None = None) -> dict[str, Any]:
+    """Extract additional profit-quality and capital-intensity metrics from report text."""
+    base = extract_financial_row_from_report_text(text=text, title=title)
+    body, report_year, report_date = _build_report_text_body(text=text, title=title)
+
+    deducted_net_profit, deducted_net_profit_evidence = _best_metric_match(
+        body,
+        keywords=[
+            "归属于上市公司股东的扣除非经常性损益的净利润",
+            "扣除非经常性损益后的净利润",
+            "扣非净利润",
+        ],
+        metric_name="deducted_net_profit",
+        prefer_large_amount=True,
+        prefer_after_keyword=True,
+    )
+    operating_cash_flow, operating_cash_flow_evidence = _best_metric_match(
+        body,
+        keywords=[
+            "经营活动产生的现金流量净额",
+            "经营现金流量净额",
+            "经营活动现金流净额",
+        ],
+        metric_name="operating_cash_flow",
+        prefer_large_amount=True,
+        prefer_after_keyword=True,
+    )
+    capex_cash_outflow, capex_cash_outflow_evidence = _best_metric_match(
+        body,
+        keywords=[
+            "购建固定资产、无形资产和其他长期资产支付的现金",
+            "购建固定资产无形资产和其他长期资产支付的现金",
+            "资本开支",
+        ],
+        metric_name="capex_cash_outflow",
+        prefer_large_amount=True,
+        prefer_after_keyword=True,
+    )
+
+    extra_warnings: list[str] = []
+    if deducted_net_profit is None:
+        extra_warnings.append("Deducted net profit was not reliably extracted.")
+    if operating_cash_flow is None:
+        extra_warnings.append("Operating cash flow was not reliably extracted.")
+    if capex_cash_outflow is None:
+        extra_warnings.append("Capex cash outflow was not reliably extracted.")
+
+    evidence = [
+        item
+        for item in [
+            *base.get("evidence", []),
+            deducted_net_profit_evidence,
+            operating_cash_flow_evidence,
+            capex_cash_outflow_evidence,
+        ]
+        if item
+    ]
+
+    return {
+        "report_year": report_year,
+        "report_date": report_date,
+        "revenue": base.get("revenue"),
+        "net_profit": base.get("net_profit"),
+        "deducted_net_profit": deducted_net_profit,
+        "operating_cash_flow": operating_cash_flow,
+        "roe": base.get("roe"),
+        "debt_ratio": base.get("debt_ratio"),
+        "capex_cash_outflow": capex_cash_outflow,
+        "evidence": evidence,
+        "warnings": [*base.get("warnings", []), *extra_warnings],
     }
