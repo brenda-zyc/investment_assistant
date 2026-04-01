@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import threading
 from typing import Any
 
 
+REPORT_CONTEXT_CACHE_MAX_ENTRIES = 8
 _REPORT_CONTEXT_LOCK = threading.Lock()
 _REPORT_CONTEXTS: dict[str, dict[str, Any]] = {}
 
@@ -30,11 +32,15 @@ def clear_report_context_cache() -> None:
 def store_report_context(report_key: str, context: dict[str, Any]) -> None:
     """Store one report context as an isolated copy in process memory."""
     with _REPORT_CONTEXT_LOCK:
-        _REPORT_CONTEXTS[report_key] = dict(context)
+        _REPORT_CONTEXTS.pop(report_key, None)
+        _REPORT_CONTEXTS[report_key] = copy.deepcopy(context)
+        while len(_REPORT_CONTEXTS) > REPORT_CONTEXT_CACHE_MAX_ENTRIES:
+            oldest_key = next(iter(_REPORT_CONTEXTS))
+            _REPORT_CONTEXTS.pop(oldest_key)
 
 
 def get_cached_report_context(report_key: str) -> dict[str, Any] | None:
     """Return a copy of the cached report context for the requested key."""
     with _REPORT_CONTEXT_LOCK:
         current = _REPORT_CONTEXTS.get(report_key)
-    return dict(current) if current else None
+    return copy.deepcopy(current) if current else None
