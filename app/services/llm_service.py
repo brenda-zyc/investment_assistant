@@ -229,3 +229,44 @@ def interpret_annual_report_text(
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
     )
+
+
+def answer_report_question_with_llm(
+    *,
+    report_title: str | None,
+    report_text: str,
+    question: str,
+    history: list[dict[str, str]],
+    session_summary: str,
+    extracted_metrics: dict[str, Any],
+    answers: list[dict[str, Any]],
+    llm_analysis: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Answer one report-scoped question using the configured chat-completion provider."""
+    effective = get_effective_llm_config()
+    if not effective:
+        raise ValueError("No LLM configuration is available")
+
+    prompt = {
+        "task": "Answer one question about the currently active annual report only.",
+        "question": question,
+        "session_summary": session_summary,
+        "history": history,
+        "report_title": report_title,
+        "extracted_metrics": extracted_metrics,
+        "three_questions": answers,
+        "llm_reading_notes": llm_analysis,
+        "report_text": report_text[:16000],
+        "constraints": [
+            "Use only the provided annual-report context.",
+            "Do not give buy or sell advice.",
+            "Return JSON only.",
+        ],
+    }
+    return _post_chat_completion(
+        effective,
+        [
+            {"role": "system", "content": "You are a report-scoped financial Q&A assistant. Return JSON only."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+    )
