@@ -10,6 +10,96 @@ from app.services.llm_service import answer_report_question_with_llm
 
 REPORT_CONTEXT_CACHE_MAX_ENTRIES = 8
 REPORT_QA_HISTORY_MAX_TURNS = 6
+REPORT_SCOPE_KEYWORDS = (
+    "利润",
+    "净利",
+    "收入",
+    "营收",
+    "现金流",
+    "增长",
+    "毛利",
+    "毛利率",
+    "净利率",
+    "业绩",
+    "风险",
+    "业务",
+    "经营",
+    "成本",
+    "费用",
+    "资本",
+    "capex",
+    "revenue",
+    "profit",
+    "cash flow",
+    "margin",
+    "report",
+    "annual report",
+    "年报",
+    "半年报",
+    "季报",
+    "公告",
+)
+REPORT_FOLLOW_UP_KEYWORDS = (
+    "为什么",
+    "怎么",
+    "为何",
+    "原因",
+    "展开",
+    "讲讲",
+    "细说",
+    "详细",
+    "补充",
+    "再说",
+    "多说",
+    "来自",
+    "改善",
+    "变化",
+    "影响",
+    "是否",
+    "能否",
+    "如何",
+    "what",
+    "why",
+    "how",
+    "cause",
+    "driver",
+)
+OUT_OF_SCOPE_KEYWORDS = (
+    "买入",
+    "卖出",
+    "目标价",
+    "目标价格",
+    "推荐",
+    "建议",
+    "值不值得买",
+    "值得买吗",
+    "能买吗",
+    "该买吗",
+    "buy",
+    "sell",
+    "price target",
+    "portfolio",
+    "持仓",
+    "炒股",
+    "投顾",
+    "股价",
+    "现价",
+    "市值",
+    "行情",
+    "涨跌",
+    "涨跌幅",
+    "收盘",
+    "开盘",
+    "成交量",
+    "市盈率",
+    "市净率",
+    "pe",
+    "pb",
+    "天气",
+    "电影",
+    "足球",
+    "明星",
+)
 _REPORT_CONTEXT_LOCK = threading.Lock()
 _REPORT_CONTEXTS: dict[str, dict[str, Any]] = {}
 
@@ -61,6 +151,76 @@ def _normalize_history_turn(item: dict[str, Any]) -> dict[str, str] | None:
         return None
 
     return {"role": role, "content": content}
+
+
+def _normalize_scope_text(*parts: object) -> str:
+    """Join text fragments into a normalized lowercase scope string."""
+    joined = " ".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    return re.sub(r"\s+", " ", joined).strip().lower()
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    """Return True when the normalized text contains any configured keyword."""
+    return any(keyword in text for keyword in keywords)
+
+
+def _collect_report_grounding(context: dict[str, Any]) -> list[str]:
+    """Collect report-backed snippets for grounded fallback answers."""
+    evidence: list[str] = []
+
+    llm_analysis = context.get("llm_analysis")
+    if isinstance(llm_analysis, dict):
+        summary_text = str(llm_analysis.get("summary") or "").strip()
+        if summary_text:
+            evidence.append(summary_text)
+
+    extracted_metrics = context.get("extracted_metrics")
+    if isinstance(extracted_metrics, dict):
+        for key in ("revenue", "net_profit", "operating_cash_flow", "deducted_net_profit", "roe", "capex_cash_outflow"):
+            value = extracted_metrics.get(key)
+            if value is not None:
+                evidence.append(f"{key}: {value}")
+            if len(evidence) >= 5:
+                return evidence
+
+    report_text = str(context.get("report_text") or "").strip()
+    if report_text and len(evidence) < 5:
+        evidence.append(report_text[:180])
+
+    return evidence
+
+
+def _is_report_scoped_question(
+    question: str,
+    context: dict[str, Any],
+    history: list[dict[str, str]],
+    session_summary: str,
+) -> bool:
+    """Return True when the question is about the active report and not clearly out of scope."""
+    report_text = str(context.get("report_text") or "").strip()
+    if not report_text:
+        return False
+
+    normalized_question = _normalize_scope_text(question)
+    if not normalized_question:
+        return False
+
+    if _contains_any(normalized_question, OUT_OF_SCOPE_KEYWORDS):
+        return False
+
+    if _contains_any(normalized_question, REPORT_SCOPE_KEYWORDS):
+        return True
+
+    context_text = _normalize_scope_text(
+        session_summary,
+        " ".join(turn.get("content", "") for turn in history or []),
+        context.get("report_text"),
+        context.get("llm_analysis", {}).get("summary") if isinstance(context.get("llm_analysis"), dict) else "",
+    )
+    if _contains_any(context_text, REPORT_SCOPE_KEYWORDS) and _contains_any(normalized_question, REPORT_FOLLOW_UP_KEYWORDS):
+        return True
+
+    return False
 
 
 def bound_history(
@@ -121,11 +281,19 @@ def _select_rule_fallback_reference(question: str, answers: list[dict[str, Any]]
 
 def build_rule_fallback_answer(question: str, context: dict[str, Any]) -> dict[str, Any]:
     """Build a constrained report-only answer from cached context without using the LLM."""
+    return build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=True)
+
+
+def build_rule_fallback_answer_with_scope(
+    question: str,
+    context: dict[str, Any],
+    *,
+    allow_cached_answer: bool,
+) -> dict[str, Any]:
+    """Build a boundary or report-grounded fallback answer based on the current scope."""
     answers = context.get("answers") or []
-    llm_analysis = context.get("llm_analysis") or {}
-    extracted_metrics = context.get("extracted_metrics") or {}
-    reference_answer = _select_rule_fallback_reference(question, answers)
-    has_reference_answer = reference_answer is not None
+    reference_answer = _select_rule_fallback_reference(question, answers) if allow_cached_answer else None
+    grounded_evidence = _collect_report_grounding(context) if allow_cached_answer else []
 
     evidence: list[str] = []
     if reference_answer:
@@ -133,30 +301,14 @@ def build_rule_fallback_answer(question: str, context: dict[str, Any]) -> dict[s
             text = str(item or "").strip()
             if text:
                 evidence.append(text)
-
-    if not evidence and isinstance(llm_analysis, dict):
-        summary_text = str(llm_analysis.get("summary") or "").strip()
-        if summary_text:
-            evidence.append(summary_text)
-
-    if not evidence:
-        for key in ("revenue", "net_profit", "operating_cash_flow", "deducted_net_profit", "roe", "capex_cash_outflow"):
-            value = extracted_metrics.get(key)
-            if value is not None:
-                evidence.append(f"{key}: {value}")
-            if len(evidence) >= 5:
-                break
-
-    if not evidence:
-        report_text = str(context.get("report_text") or "").strip()
-        if report_text:
-            evidence.append(report_text[:180])
+    if not evidence and grounded_evidence:
+        evidence.extend(grounded_evidence)
 
     short_answer = ""
-    if has_reference_answer:
+    if reference_answer:
         short_answer = str(reference_answer.get("summary") or reference_answer.get("answer") or "").strip()
-        if not short_answer and isinstance(llm_analysis, dict):
-            short_answer = str(llm_analysis.get("summary") or "").strip()
+    if not short_answer and grounded_evidence:
+        short_answer = grounded_evidence[0]
     if not short_answer:
         short_answer = (
             "This Q&A session is limited to the currently loaded annual report. "
@@ -190,9 +342,9 @@ def answer_report_question(
         raise ValueError("Report key does not match the requested symbol.")
 
     bounded_history, updated_summary = bound_history(history, session_summary)
-    has_report_scope_match = _select_rule_fallback_reference(question, context.get("answers", []) or []) is not None
-    if not has_report_scope_match:
-        fallback = build_rule_fallback_answer(question, context)
+    is_report_scoped = _is_report_scoped_question(question, context, bounded_history, updated_summary)
+    if not is_report_scoped:
+        fallback = build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=False)
         fallback["updated_session_summary"] = updated_summary
         fallback["session_reset"] = False
         fallback["session_key"] = report_key
@@ -224,7 +376,7 @@ def answer_report_question(
         except Exception:
             pass
 
-    fallback = build_rule_fallback_answer(question, context)
+    fallback = build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=True)
     fallback["updated_session_summary"] = updated_summary
     fallback["session_reset"] = False
     fallback["session_key"] = report_key

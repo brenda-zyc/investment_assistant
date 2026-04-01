@@ -186,6 +186,36 @@ def test_answer_report_question_returns_rule_fallback_without_llm() -> None:
     assert payload["citations"] == []
 
 
+def test_answer_report_question_uses_report_context_when_llm_is_disabled_and_no_cached_answer_matches() -> None:
+    """Report-scoped questions without a cached-answer match should still use report context."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长，经营现金流改善。",
+            "answers": [],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="今年利润增长主要来自哪里？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert payload["short_answer"] != "This Q&A session is limited to the currently loaded annual report. Please narrow the question to this report."
+    assert payload["evidence"]
+    assert payload["session_reset"] is False
+
+
 def test_answer_report_question_raises_for_missing_cached_context() -> None:
     """Answering without cached report context should fail fast."""
     report_qa_service.clear_report_context_cache()
@@ -240,6 +270,21 @@ def test_answer_report_question_falls_back_to_rule_fallback_when_llm_wrapper_rai
     assert "prior summary" in payload["updated_session_summary"]
 
 
+def test_is_report_scoped_question_rejects_market_data_question() -> None:
+    """Market-data questions should not be classified as report scoped."""
+    context = {
+        "report_text": "海外收入同比增长，经营现金流改善。",
+        "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+    }
+
+    assert report_qa_service._is_report_scoped_question(
+        "公司股价现在多少？",
+        context,
+        [],
+        "",
+    ) is False
+
+
 def test_answer_report_question_returns_llm_hybrid_when_llm_wrapper_succeeds(monkeypatch) -> None:
     """Successful LLM answers should be surfaced as hybrid report Q&A output."""
     report_qa_service.clear_report_context_cache()
@@ -281,6 +326,147 @@ def test_answer_report_question_returns_llm_hybrid_when_llm_wrapper_succeeds(mon
     assert payload["citations"]
     assert payload["session_key"] == "000333|https://example.com/report.pdf"
     assert payload["session_reset"] is False
+
+
+def test_answer_report_question_returns_llm_hybrid_with_no_cached_answers_when_question_is_report_scoped(monkeypatch) -> None:
+    """Report-scoped questions should still reach the LLM path even when there are no cached answers."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长，经营现金流改善。",
+            "answers": [],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    def fake_llm(**kwargs):
+        assert kwargs["question"] == "今年利润增长主要来自哪里？"
+        assert kwargs["answers"] == []
+        return {
+            "short_answer": "growth drivers",
+            "evidence": ["report evidence"],
+            "citations": [{"source": "report_text", "snippet": "海外收入同比增长"}],
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="今年利润增长主要来自哪里？",
+        history=[],
+        session_summary="",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "llm_hybrid"
+    assert payload["short_answer"] == "growth drivers"
+    assert payload["session_reset"] is False
+
+
+def test_answer_report_question_returns_llm_hybrid_for_follow_up_wording_without_report_keywords(monkeypatch) -> None:
+    """Follow-up wording alone should still reach the LLM when the session context anchors the report."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长，经营现金流改善。",
+            "answers": [],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_llm(**kwargs):
+        captured["history"] = kwargs["history"]
+        captured["session_summary"] = kwargs["session_summary"]
+        return {
+            "short_answer": "follow-up answer",
+            "evidence": ["report evidence"],
+            "citations": [],
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="能展开讲讲吗？",
+        history=[
+            {"role": "user", "content": "之前我们讨论过现金流"},
+            {"role": "assistant", "content": "现金流确实改善。"},
+        ],
+        session_summary="上一轮重点在现金流改善。",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "llm_hybrid"
+    assert payload["short_answer"] == "follow-up answer"
+    assert captured["history"] == [
+        {"role": "user", "content": "之前我们讨论过现金流"},
+        {"role": "assistant", "content": "现金流确实改善。"},
+    ]
+    assert captured["session_summary"] == "上一轮重点在现金流改善。"
+
+
+def test_answer_report_question_returns_llm_hybrid_for_follow_up_without_cached_answer_match(monkeypatch) -> None:
+    """Follow-up context should still allow LLM answering even without a cached-answer match."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长，经营现金流改善。",
+            "answers": [],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_llm(**kwargs):
+        captured["history"] = kwargs["history"]
+        captured["session_summary"] = kwargs["session_summary"]
+        return {
+            "short_answer": "follow-up answer",
+            "evidence": ["report evidence"],
+            "citations": [],
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="为什么会改善？",
+        history=[
+            {"role": "user", "content": "之前我们讨论过现金流"},
+            {"role": "assistant", "content": "现金流确实改善。"},
+        ],
+        session_summary="上一轮重点在现金流改善。",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "llm_hybrid"
+    assert payload["short_answer"] == "follow-up answer"
+    assert captured["history"] == [
+        {"role": "user", "content": "之前我们讨论过现金流"},
+        {"role": "assistant", "content": "现金流确实改善。"},
+    ]
+    assert captured["session_summary"] == "上一轮重点在现金流改善。"
 
 
 def test_answer_report_question_rejects_generic_llm_answer_for_unmatched_question(monkeypatch) -> None:
@@ -331,8 +517,45 @@ def test_answer_report_question_rejects_generic_llm_answer_for_unmatched_questio
     assert payload["mode"] == "rule_fallback"
     assert payload["short_answer"] != "This is a generic unrelated answer."
     assert "currently loaded annual report" in payload["short_answer"]
-    assert "generic evidence" not in payload["evidence"]
+    assert payload["evidence"] == []
+    assert payload["confidence"] == "low"
     assert payload["session_reset"] is False
+
+
+def test_answer_report_question_rejects_out_of_scope_question_with_report_keywords(monkeypatch) -> None:
+    """Out-of-scope questions should return a boundary fallback even when cached answers look related."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长，经营现金流改善。",
+            "answers": [
+                {
+                    "question": "现金流怎么看？",
+                    "summary": "现金流改善。",
+                    "evidence": ["cashflow-answer-evidence"],
+                }
+            ],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="买入后现金流怎么看？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert payload["short_answer"] != "现金流改善。"
+    assert payload["evidence"] == []
+    assert payload["confidence"] == "low"
 
 
 def test_answer_report_question_uses_boundary_fallback_for_unmatched_question() -> None:
@@ -374,4 +597,5 @@ def test_answer_report_question_uses_boundary_fallback_for_unmatched_question() 
     assert payload["short_answer"] != "海外业务和 ToB 业务带动增长。"
     assert "currently loaded annual report" in payload["short_answer"]
     assert "narrow the question" in payload["short_answer"].lower()
-    assert "first-answer-evidence" not in payload["evidence"]
+    assert payload["evidence"] == []
+    assert payload["confidence"] == "low"
