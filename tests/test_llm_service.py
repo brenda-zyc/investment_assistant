@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import urllib.error
 from types import SimpleNamespace
 
 from app.services import llm_service
@@ -130,3 +132,32 @@ def test_answer_report_question_with_llm_uses_post_chat_completion_and_returns_p
     assert captured["timeout"] == 20
     assert captured["messages"][0]["role"] == "system"
     assert "report-scoped financial Q&A assistant" in captured["messages"][0]["content"]
+
+
+def test_post_chat_completion_logs_connection_failure(caplog, monkeypatch) -> None:
+    """Transport failures should emit one warning log with enough metadata for diagnosis."""
+    monkeypatch.setattr(llm_service, "_build_ssl_context", lambda: "ssl-context")
+
+    def fake_urlopen(request, timeout=None, context=None):
+        raise urllib.error.URLError("timed out")
+
+    monkeypatch.setattr(llm_service.urllib.request, "urlopen", fake_urlopen)
+
+    with caplog.at_level(logging.WARNING):
+        try:
+            llm_service._post_chat_completion(
+                {
+                    "provider": "deepseek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "model": "deepseek-chat",
+                    "api_key": "sk-test",
+                },
+                [{"role": "user", "content": "hi"}],
+                timeout_seconds=7,
+            )
+        except RuntimeError:
+            pass
+        else:  # pragma: no cover - defensive branch
+            raise AssertionError("expected RuntimeError")
+
+    assert "llm_chat_completion connection_failed provider=deepseek model=deepseek-chat timeout=7" in caplog.text

@@ -37,6 +37,45 @@ _CNINFO_DISCLOSURE_DETAIL_BASE_URL = "http://www.cninfo.com.cn/new/disclosure/de
 _CNINFO_STATIC_BASE_URL = "http://static.cninfo.com.cn/"
 _CNINFO_FULL_YEAR_EXCLUDE_TOKENS = ("摘要", "英文", "取消", "问询", "回复", "更正", "提示性公告")
 _PDF_STRUCTURE_MARKERS = ("%pdf-", "endobj", "stream", "endstream", "xref", "trailer", "/type/", "/catalog")
+_AUTOREAD_OVERVIEW_KEYWORDS = (
+    "管理层讨论与分析",
+    "经营情况讨论与分析",
+    "主营业务",
+    "收入",
+    "利润",
+    "增长",
+    "海外",
+    "渠道",
+    "产品结构",
+    "to b",
+    "tob",
+)
+_AUTOREAD_AUTHENTICITY_KEYWORDS = (
+    "扣除非经常性损益",
+    "非经常性损益",
+    "经营活动产生的现金流量净额",
+    "现金流量净额",
+    "回款",
+    "政府补助",
+    "公允价值",
+    "会计政策",
+)
+_AUTOREAD_CAPITAL_KEYWORDS = (
+    "资本开支",
+    "购建固定资产",
+    "无形资产",
+    "长期资产",
+    "在建工程",
+    "固定资产",
+    "产能",
+    "工厂",
+    "自动化",
+    "扩产",
+    "投资",
+    "设备",
+)
+_AUTOREAD_RISK_KEYWORDS = ("风险", "关税", "汇率", "原材料", "需求", "价格波动")
+_AUTOREAD_NOISE_KEYWORDS = ("目录", "重要提示", "释义", "公司简介", "股票简称")
 
 
 def _decode_http_bytes(raw: bytes, content_type: str) -> str:
@@ -220,6 +259,110 @@ def _build_report_text_body(text: str, title: str | None = None) -> tuple[str, i
         report_date = f"{report_year}-12-31"
 
     return body, report_year, report_date
+
+
+def _split_autoread_segments(text: str, title: str | None = None) -> list[str]:
+    """Split report text into candidate segments while keeping semantically useful boundaries."""
+    raw = ((title or "") + "\n" + (text or "")).replace("\r\n", "\n").replace("\r", "\n")
+    block_candidates = [item.strip() for item in re.split(r"\n{2,}", raw) if item.strip()]
+    if len(block_candidates) >= 6:
+        segments = block_candidates
+    else:
+        segments = [item.strip() for item in re.split(r"(?<=[。！？；;])\s+|\n+", raw) if item.strip()]
+
+    normalized_segments: list[str] = []
+    seen: set[str] = set()
+    for segment in segments:
+        cleaned = re.sub(r"\s+", " ", segment).strip()
+        if len(cleaned) < 12:
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized_segments.append(cleaned)
+    return normalized_segments
+
+
+def _score_autoread_segment(segment: str, keywords: tuple[str, ...]) -> int:
+    """Score one segment for a specific retrieval theme."""
+    normalized = segment.lower()
+    score = sum(1 for keyword in keywords if keyword.lower() in normalized) * 3
+    score += min(len(segment) // 80, 3)
+    if any(noise.lower() in normalized for noise in _AUTOREAD_NOISE_KEYWORDS):
+        score -= 2
+    return score
+
+
+def _pick_segments_for_keywords(
+    segments: list[str],
+    keywords: tuple[str, ...],
+    *,
+    used: set[str],
+    max_items: int,
+) -> list[str]:
+    """Pick top unique segments for one keyword theme."""
+    ranked = [
+        (score, len(segment), index, segment)
+        for index, segment in enumerate(segments)
+        if segment not in used and (score := _score_autoread_segment(segment, keywords)) > 0
+    ]
+    ranked.sort(reverse=True)
+    selected: list[str] = []
+    for _score, _length, _index, segment in ranked:
+        selected.append(segment)
+        used.add(segment)
+        if len(selected) >= max_items:
+            break
+    return selected
+
+
+def build_autoread_llm_excerpt(text: str, title: str | None = None, max_chars: int = 6000) -> str:
+    """Build a compact report excerpt focused on the three autoread questions."""
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+
+    segments = _split_autoread_segments(text, title=title)
+    if not segments:
+        return ""
+
+    # Financial logic: select evidence in question order so profit quality, sustainability,
+    # and capital intensity all keep at least one supporting segment when possible.
+    used: set[str] = set()
+    selected: list[str] = []
+    if title:
+        selected.append(title.strip())
+        used.add(title.strip())
+
+    for keyword_group, limit in (
+        (_AUTOREAD_OVERVIEW_KEYWORDS, 2),
+        (_AUTOREAD_AUTHENTICITY_KEYWORDS, 2),
+        (_AUTOREAD_CAPITAL_KEYWORDS, 2),
+        (_AUTOREAD_RISK_KEYWORDS, 1),
+    ):
+        selected.extend(_pick_segments_for_keywords(segments, keyword_group, used=used, max_items=limit))
+
+    if len(selected) < 4:
+        for segment in segments:
+            if segment in used:
+                continue
+            selected.append(segment)
+            used.add(segment)
+            if len(selected) >= 6:
+                break
+
+    excerpt_parts: list[str] = []
+    current_length = 0
+    for segment in selected:
+        addition = segment if not excerpt_parts else f"\n\n{segment}"
+        if excerpt_parts and current_length + len(addition) > max_chars:
+            continue
+        if not excerpt_parts and len(segment) > max_chars:
+            excerpt_parts.append(segment[:max_chars].strip())
+            break
+        excerpt_parts.append(segment)
+        current_length += len(addition)
+
+    return "\n\n".join(excerpt_parts).strip()
 
 
 def _load_cninfo_symbol_org_map(timeout_sec: int = 12) -> dict[str, str]:

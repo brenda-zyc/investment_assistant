@@ -6,6 +6,7 @@ import pytest
 
 from app.services import financial_report_service as report_service
 from app.services.financial_report_service import (
+    build_autoread_llm_excerpt,
     extract_financial_row_from_report_text,
     extract_report_assessment_metrics,
     fetch_report_text_from_url,
@@ -88,6 +89,41 @@ def test_extract_report_assessment_metrics_rejects_unitless_cash_flow_amount() -
 
     assert payload["operating_cash_flow"] is None
     assert "Operating cash flow was not reliably extracted." in payload["warnings"]
+
+
+def test_build_autoread_llm_excerpt_prefers_three_question_relevant_segments() -> None:
+    text = """
+    2025年年度报告
+    公司坚持科技领先和全球突破，整体收入保持增长。
+
+    目录
+    第一节 重要提示
+    第二节 公司简介
+
+    管理层讨论与分析
+    报告期内，公司海外电商和OBM业务继续增长，整体收入增长主要来自海外渠道拓展和产品结构升级。
+
+    非经常性损益项目
+    政府补助和公允价值变动收益对利润有影响，但扣除非经常性损益后的净利润仍保持增长。
+
+    经营活动产生的现金流量净额
+    经营活动产生的现金流量净额同比提升，现金回款质量改善。
+
+    资本开支
+    公司持续投入智能制造、海外工厂建设和自动化产线升级，在建工程和固定资产投入增加。
+
+    风险提示
+    海外关税、汇率和原材料价格波动可能影响未来利润率。
+    """
+
+    excerpt = build_autoread_llm_excerpt(text, title="2025年年度报告", max_chars=500)
+
+    assert "整体收入增长主要来自海外渠道拓展和产品结构升级" in excerpt
+    assert "扣除非经常性损益后的净利润仍保持增长" in excerpt
+    assert "经营活动产生的现金流量净额同比提升" in excerpt
+    assert "智能制造、海外工厂建设和自动化产线升级" in excerpt
+    assert "目录" not in excerpt
+    assert len(excerpt) <= 500
 
 
 def test_select_latest_annual_report_prefers_full_report() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import ssl
 import threading
@@ -16,6 +17,7 @@ except ImportError:  # pragma: no cover - fallback for environments where certif
 
 _SESSION_LOCK = threading.Lock()
 _SESSION_LLM_CONFIG: dict[str, str] = {}
+logger = logging.getLogger(__name__)
 
 
 def _normalize_llm_config(config: dict[str, Any]) -> dict[str, str]:
@@ -125,6 +127,13 @@ def _post_chat_completion(
 ) -> dict[str, Any]:
     """Send one OpenAI-compatible chat completion request and parse JSON response."""
     request_url = f"{config['base_url']}/chat/completions"
+    logger.info(
+        "llm_chat_completion start provider=%s model=%s timeout=%s message_count=%s",
+        config["provider"],
+        config["model"],
+        timeout_seconds,
+        len(messages),
+    )
     payload = {
         "model": config["model"],
         "temperature": 0.1,
@@ -146,8 +155,23 @@ def _post_chat_completion(
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
+        logger.warning(
+            "llm_chat_completion http_error provider=%s model=%s timeout=%s status=%s detail=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            exc.code,
+            detail[:300],
+        )
         raise RuntimeError(f"LLM HTTP error {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
+        logger.warning(
+            "llm_chat_completion connection_failed provider=%s model=%s timeout=%s reason=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            exc.reason,
+        )
         raise RuntimeError(f"LLM connection failed: {exc.reason}") from exc
 
     parsed = json.loads(raw)
@@ -157,8 +181,22 @@ def _post_chat_completion(
         .get("content")
     )
     if not content:
+        logger.warning(
+            "llm_chat_completion empty_content provider=%s model=%s timeout=%s response_keys=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            sorted(parsed.keys()),
+        )
         raise RuntimeError("LLM response did not contain message content")
-    return json.loads(content)
+    result = json.loads(content)
+    logger.info(
+        "llm_chat_completion success provider=%s model=%s response_keys=%s",
+        config["provider"],
+        config["model"],
+        sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
+    )
+    return result
 
 
 def test_llm_connection(config: dict[str, Any] | None = None) -> dict[str, Any]:

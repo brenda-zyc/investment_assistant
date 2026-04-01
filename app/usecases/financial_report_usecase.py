@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from app.core_logic import compute_financial_report_analysis, compute_financial_report_autoread_assessment
 from app.db import fetch_financial_reports, upsert_financial_reports
 from app.services.financial_report_service import (
+    build_autoread_llm_excerpt,
     extract_report_assessment_metrics,
     extract_financial_row_from_report_text,
     fetch_report_text_from_url,
@@ -18,6 +20,9 @@ from app.services.market_data_service import (
     fetch_report_assessment_context,
     fetch_stock_names,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_financial_report_analysis(symbol: str) -> dict:
@@ -257,15 +262,40 @@ def autonomous_financial_report_read(symbol: str) -> dict:
     llm_analysis: dict | None = None
     if fetched_report and fetched_report.get("text") and llm_config:
         try:
+            llm_excerpt = build_autoread_llm_excerpt(
+                fetched_report["text"],
+                title=(report_meta or {}).get("title"),
+            )
+            logger.info(
+                "report_autoread llm_attempt symbol=%s mode=%s report_title=%s text_length=%s excerpt_length=%s",
+                symbol,
+                current_mode,
+                (report_meta or {}).get("title"),
+                len(str(fetched_report.get("text") or "")),
+                len(llm_excerpt),
+            )
             llm_analysis = interpret_annual_report_text(
                 symbol=symbol,
                 symbol_name=symbol_name,
                 report_title=(report_meta or {}).get("title"),
-                report_text=fetched_report["text"],
+                report_text=llm_excerpt,
                 current_mode=current_mode,
             )
             llm_used = True
+            logger.info(
+                "report_autoread llm_success symbol=%s mode=%s summary_present=%s note_count=%s",
+                symbol,
+                current_mode,
+                bool(str((llm_analysis or {}).get("summary") or "").strip()),
+                len((llm_analysis or {}).get("question_notes", []) or []),
+            )
         except Exception as exc:
+            logger.warning(
+                "report_autoread llm_failed symbol=%s mode=%s reason=%s",
+                symbol,
+                current_mode,
+                exc,
+            )
             warnings.append(f"LLM interpretation failed. Reason: {exc}")
     # TODO: Add optional LLM synthesis when a model provider is configured in this repo.
     report_key = _cache_active_report_context(

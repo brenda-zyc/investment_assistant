@@ -152,8 +152,13 @@ def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_
     )
     monkeypatch.setattr(
         financial_report_usecase,
+        "build_autoread_llm_excerpt",
+        lambda text, title=None, max_chars=6000: f"compressed::{title}::{text[:20]}",
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
         "interpret_annual_report_text",
-        lambda **_kwargs: {
+        lambda **kwargs: {
             "summary": "LLM summary",
             "question_notes": [
                 {
@@ -162,6 +167,7 @@ def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_
                     "evidence": ["经营现金流覆盖净利润。"],
                 }
             ],
+            "debug_excerpt": kwargs["report_text"],
         },
     )
 
@@ -172,6 +178,7 @@ def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_
     assert payload["llm_provider"] == "deepseek"
     assert payload["llm_model"] == "deepseek-chat"
     assert payload["llm_analysis"]["summary"] == "LLM summary"
+    assert payload["llm_analysis"]["debug_excerpt"].startswith("compressed::2024年年度报告::")
 
 
 def test_autonomous_financial_report_read_falls_back_when_llm_interpretation_fails(monkeypatch) -> None:
