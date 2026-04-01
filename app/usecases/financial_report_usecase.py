@@ -11,6 +11,7 @@ from app.services.financial_report_service import (
     find_latest_annual_report,
 )
 from app.services.report_qa_service import build_report_key, store_report_context
+from app.services.report_qa_service import answer_report_question as answer_report_question_service
 from app.services.llm_service import get_effective_llm_config, interpret_annual_report_text
 from app.services.market_data_service import (
     fetch_financial_summary,
@@ -120,6 +121,34 @@ def analyze_financial_report_url(url: str, symbol: str | None = None) -> dict:
         "analysis": analysis_payload,
         "extracted": extracted,
     }
+
+
+def answer_financial_report_question(
+    *,
+    symbol: str,
+    report_key: str,
+    question: str,
+    history: list[dict[str, str]],
+    session_summary: str,
+    use_llm: bool,
+) -> dict:
+    """Validate one report-scoped question and delegate to the report-Q&A service."""
+    normalized_question = str(question or "").strip()
+    if not normalized_question:
+        raise ValueError("question is required")
+
+    normalized_report_key = str(report_key or "").strip()
+    if not normalized_report_key:
+        raise ValueError("report_key is required")
+
+    return answer_report_question_service(
+        symbol=symbol,
+        report_key=normalized_report_key,
+        question=normalized_question,
+        history=history,
+        session_summary=session_summary,
+        use_llm=use_llm,
+    )
 
 
 def _latest_as_of_date(

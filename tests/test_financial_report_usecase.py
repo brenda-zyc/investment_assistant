@@ -378,3 +378,37 @@ def test_analyze_financial_report_url_returns_none_report_key_when_report_text_i
 
     assert payload["report_key"] is None
     assert report_qa_service.get_cached_report_context("000333|https://example.com/report.pdf") is None
+
+
+def test_answer_financial_report_question_strips_question_and_delegates(monkeypatch) -> None:
+    """The usecase wrapper should validate input and delegate a normalized payload to the service."""
+    captured: dict[str, object] = {}
+
+    def fake_answer_report_question(**kwargs):
+        captured.update(kwargs)
+        return {
+            "session_key": kwargs["report_key"],
+            "mode": "rule_fallback",
+            "short_answer": "ok",
+            "evidence": [],
+            "citations": [],
+            "confidence": "low",
+            "updated_session_summary": kwargs["session_summary"],
+            "session_reset": False,
+        }
+
+    monkeypatch.setattr(financial_report_usecase, "answer_report_question_service", fake_answer_report_question)
+
+    payload = financial_report_usecase.answer_financial_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question=" 今年利润增长主要来自哪里？ ",
+        history=[{"role": "user", "content": "旧问题"}],
+        session_summary="summary",
+        use_llm=True,
+    )
+
+    assert payload["session_key"] == "000333|https://example.com/report.pdf"
+    assert captured["question"] == "今年利润增长主要来自哪里？"
+    assert captured["history"] == [{"role": "user", "content": "旧问题"}]
+    assert captured["use_llm"] is True

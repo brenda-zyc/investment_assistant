@@ -1,5 +1,7 @@
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.llm_service import (
     get_session_llm_config_masked,
@@ -10,6 +12,7 @@ from app.services.market_data_service import normalize_stock_code
 from app.usecases.financial_report_usecase import (
     analyze_financial_report_url,
     autonomous_financial_report_read,
+    answer_financial_report_question,
     get_financial_report_analysis,
 )
 
@@ -20,6 +23,24 @@ router = APIRouter()
 class FinancialReportUrlRequest(BaseModel):
     url: str
     symbol: str | None = None
+
+
+class FinancialReportQaTurn(BaseModel):
+    """One chat turn in the report-scoped Q&A transcript."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class FinancialReportQaRequest(BaseModel):
+    """Request payload for one report-scoped Q&A turn."""
+
+    symbol: str
+    report_key: str
+    question: str = Field(..., min_length=1, max_length=1000)
+    history: list[FinancialReportQaTurn] = Field(default_factory=list)
+    session_summary: str = ""
+    use_llm: bool = True
 
 
 class LlmSessionConfigRequest(BaseModel):
@@ -76,6 +97,27 @@ def financial_report_autoread(symbol: str = Query(..., description="6-digit A-sh
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - network/runtime variability
         raise HTTPException(status_code=502, detail=f"Could not auto-read annual report: {exc}") from exc
+
+
+@router.post("/api/financial-report-qa")
+def financial_report_qa(payload: FinancialReportQaRequest) -> dict:
+    """Answer one question about the currently active annual report."""
+    try:
+        normalized_symbol = normalize_stock_code(payload.symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        return answer_financial_report_question(
+            symbol=normalized_symbol,
+            report_key=payload.report_key,
+            question=payload.question,
+            history=[item.model_dump() for item in payload.history],
+            session_summary=payload.session_summary,
+            use_llm=payload.use_llm,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/api/llm/session-config")
