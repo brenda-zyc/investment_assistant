@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import threading
 from typing import Any
@@ -64,6 +65,24 @@ REPORT_FOLLOW_UP_KEYWORDS = (
     "cause",
     "driver",
 )
+GENERIC_FOLLOW_UP_PREFIXES = (
+    "能展开",
+    "展开讲",
+    "展开一点",
+    "展开下",
+    "具体一点",
+    "再具体",
+    "细说",
+    "详细说",
+    "多说",
+    "补充",
+    "继续",
+    "也没有展开",
+    "没有展开",
+    "没展开",
+    "什么意思",
+    "然后呢",
+)
 OUT_OF_SCOPE_KEYWORDS = (
     "买入",
     "卖出",
@@ -102,6 +121,7 @@ OUT_OF_SCOPE_KEYWORDS = (
 )
 _REPORT_CONTEXT_LOCK = threading.Lock()
 _REPORT_CONTEXTS: dict[str, dict[str, Any]] = {}
+logger = logging.getLogger(__name__)
 
 
 def build_report_key(symbol: str, report: dict[str, Any] | None) -> str | None:
@@ -164,6 +184,57 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+def _is_follow_up_without_explicit_topic(question: str) -> bool:
+    """Return True when the wording looks like a follow-up but does not name a report topic."""
+    normalized_question = _normalize_scope_text(question)
+    if not normalized_question:
+        return False
+    if _contains_any(normalized_question, REPORT_SCOPE_KEYWORDS):
+        return False
+    if any(normalized_question.startswith(prefix) for prefix in GENERIC_FOLLOW_UP_PREFIXES):
+        return True
+    return _contains_any(normalized_question, REPORT_FOLLOW_UP_KEYWORDS)
+
+
+def _extract_follow_up_anchor(history: list[dict[str, str]], session_summary: str) -> str:
+    """Pick the most recent substantive user topic to anchor a weak follow-up question."""
+    for turn in reversed(history or []):
+        if turn.get("role") != "user":
+            continue
+        content = str(turn.get("content") or "").strip()
+        if not content:
+            continue
+        if not _is_follow_up_without_explicit_topic(content):
+            return content
+
+    summary_text = str(session_summary or "").strip()
+    if summary_text:
+        return summary_text
+    return ""
+
+
+def _rewrite_follow_up_question(question: str, anchor: str) -> str:
+    """Rewrite a generic follow-up so the downstream answer stays anchored to the prior topic."""
+    return (
+        f"请基于当前年报，继续展开上一轮关于“{anchor}”的问题。"
+        f"当前追问：{str(question or '').strip()}"
+    )
+
+
+def _build_follow_up_clarification_answer() -> dict[str, Any]:
+    """Return a clarification response when a follow-up lacks any usable topic anchor."""
+    return {
+        "mode": "rule_fallback",
+        "short_answer": (
+            "This Q&A session is limited to the currently loaded annual report. "
+            "Please specify which part you want to expand, such as overseas growth, ToB, risk, or cash flow."
+        ),
+        "evidence": [],
+        "citations": [],
+        "confidence": "low",
+    }
+
+
 def _collect_report_grounding(context: dict[str, Any]) -> list[str]:
     """Collect report-backed snippets for grounded fallback answers."""
     evidence: list[str] = []
@@ -188,6 +259,42 @@ def _collect_report_grounding(context: dict[str, Any]) -> list[str]:
         evidence.append(report_text[:180])
 
     return evidence
+
+
+def _normalize_llm_answer_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize provider JSON into one stable Q&A shape or reject unusable payloads."""
+    short_answer = str(
+        payload.get("short_answer")
+        or payload.get("answer")
+        or payload.get("summary")
+        or payload.get("response")
+        or ""
+    ).strip()
+    if not short_answer:
+        return None
+
+    raw_evidence = payload.get("evidence", [])
+    if isinstance(raw_evidence, str):
+        evidence = [raw_evidence.strip()] if raw_evidence.strip() else []
+    elif isinstance(raw_evidence, list):
+        evidence = [str(item).strip() for item in raw_evidence if str(item).strip()]
+    else:
+        evidence = []
+
+    raw_citations = payload.get("citations", [])
+    if isinstance(raw_citations, dict):
+        citations = [raw_citations]
+    elif isinstance(raw_citations, list):
+        citations = [item for item in raw_citations if isinstance(item, dict)]
+    else:
+        citations = []
+
+    return {
+        "short_answer": short_answer,
+        "evidence": evidence[:5],
+        "citations": citations[:5],
+        "confidence": str(payload.get("confidence") or "low").strip() or "low",
+    }
 
 
 def _is_report_scoped_question(
@@ -342,9 +449,21 @@ def answer_report_question(
         raise ValueError("Report key does not match the requested symbol.")
 
     bounded_history, updated_summary = bound_history(history, session_summary)
-    is_report_scoped = _is_report_scoped_question(question, context, bounded_history, updated_summary)
+    question_text = str(question or "").strip()
+    llm_question = question_text
+    if _is_follow_up_without_explicit_topic(question_text):
+        follow_up_anchor = _extract_follow_up_anchor(bounded_history, updated_summary)
+        if not follow_up_anchor:
+            fallback = _build_follow_up_clarification_answer()
+            fallback["updated_session_summary"] = updated_summary
+            fallback["session_reset"] = False
+            fallback["session_key"] = report_key
+            return fallback
+        llm_question = _rewrite_follow_up_question(question_text, follow_up_anchor)
+
+    is_report_scoped = _is_report_scoped_question(llm_question, context, bounded_history, updated_summary)
     if not is_report_scoped:
-        fallback = build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=False)
+        fallback = build_rule_fallback_answer_with_scope(llm_question, context, allow_cached_answer=False)
         fallback["updated_session_summary"] = updated_summary
         fallback["session_reset"] = False
         fallback["session_key"] = report_key
@@ -352,10 +471,17 @@ def answer_report_question(
 
     if use_llm:
         try:
+            logger.info(
+                "report_qa llm_attempt symbol=%s report_key=%s question=%s history_turns=%s",
+                symbol,
+                report_key,
+                llm_question,
+                len(bounded_history),
+            )
             llm_answer = answer_report_question_with_llm(
                 report_title=(context.get("report") or {}).get("title"),
                 report_text=str(context.get("report_text") or ""),
-                question=question,
+                question=llm_question,
                 history=bounded_history,
                 session_summary=updated_summary,
                 extracted_metrics=context.get("extracted_metrics", {}) or {},
@@ -363,20 +489,40 @@ def answer_report_question(
                 llm_analysis=context.get("llm_analysis"),
             )
             if isinstance(llm_answer, dict):
-                payload = dict(llm_answer)
-                payload.setdefault("short_answer", "")
-                payload.setdefault("evidence", [])
-                payload.setdefault("citations", [])
-                payload.setdefault("confidence", "low")
-                payload["mode"] = "llm_hybrid"
-                payload["updated_session_summary"] = updated_summary
-                payload["session_reset"] = False
-                payload["session_key"] = report_key
-                return payload
+                normalized_payload = _normalize_llm_answer_payload(llm_answer)
+                if normalized_payload is not None:
+                    normalized_payload["mode"] = "llm_hybrid"
+                    normalized_payload["updated_session_summary"] = updated_summary
+                    normalized_payload["session_reset"] = False
+                    normalized_payload["session_key"] = report_key
+                    logger.info(
+                        "report_qa llm_success symbol=%s report_key=%s question=%s confidence=%s evidence_count=%s citation_count=%s",
+                        symbol,
+                        report_key,
+                        llm_question,
+                        normalized_payload["confidence"],
+                        len(normalized_payload["evidence"]),
+                        len(normalized_payload["citations"]),
+                    )
+                    return normalized_payload
+                logger.warning(
+                    "report_qa unusable_llm_payload symbol=%s report_key=%s question=%s payload_keys=%s",
+                    symbol,
+                    report_key,
+                    llm_question,
+                    sorted(llm_answer.keys()),
+                )
         except Exception:
+            logger.warning(
+                "report_qa llm_failed symbol=%s report_key=%s question=%s",
+                symbol,
+                report_key,
+                llm_question,
+                exc_info=True,
+            )
             pass
 
-    fallback = build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=True)
+    fallback = build_rule_fallback_answer_with_scope(llm_question, context, allow_cached_answer=True)
     fallback["updated_session_summary"] = updated_summary
     fallback["session_reset"] = False
     fallback["session_key"] = report_key

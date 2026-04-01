@@ -65,6 +65,7 @@ def test_financial_report_template_includes_report_qa_panel() -> None:
     assert 'id="reportQaSection"' in source
     assert 'id="reportQaSessionLabel"' in source
     assert 'id="reportQaChipList"' in source
+    assert 'id="reportQaOlderToggle"' in source
     assert 'id="reportQaTranscript"' in source
     assert 'id="reportQaInput"' in source
     assert 'id="reportQaAskBtn"' in source
@@ -82,6 +83,7 @@ def test_financial_report_template_includes_report_qa_session_hooks() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
     assert "let reportQaSession" in source
+    assert "let reportQaShowOlderTurns = false;" in source
     assert "resetReportQaSession" in source
     assert "reportQaSession = {" in source
     assert "Started a new Q&A session for the active report." in source
@@ -94,10 +96,33 @@ def test_financial_report_template_includes_report_qa_ask_flow() -> None:
 
     assert 'fetch(`${apiBase}/api/financial-report-qa`' in body
     assert 'appendReportQaTurn("user", question);' in body
-    assert "history: reportQaSession.history.map" in body
+    assert "history: reportQaSession.history.slice(-6).map" in body
     assert "reportQaSession.sessionSummary" in body
     assert "updated_session_summary" in body
     assert "renderReportQaTranscript" in body
+
+
+def test_financial_report_template_keeps_full_transcript_and_renders_older_toggle() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    append_body = _function_body(source, "function appendReportQaTurn(role, content, payload = {})")
+    render_body = _function_body(source, "function renderReportQaTranscript()")
+
+    assert "reportQaSession.history = reportQaSession.history.slice(-6);" not in append_body
+    assert "function countReportQaPairs(turns)" in source
+    assert "const olderTurns = reportQaSession.history.slice(0, -6);" in render_body
+    assert "const olderPairCount = countReportQaPairs(olderTurns);" in render_body
+    assert "const visibleTurns = reportQaShowOlderTurns ? reportQaSession.history : reportQaSession.history.slice(-6);" in render_body
+    assert 'reportQaOlderToggleEl.hidden = olderTurns.length === 0;' in render_body
+    assert '`Hide older Q&A pairs (${olderPairCount})`' in render_body
+    assert '`Show older Q&A pairs (${olderPairCount})`' in render_body
+
+
+def test_financial_report_template_formats_report_qa_bold_text_safely() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "function formatReportQaRichText(value)" in source
+    assert ".replace(/\\*\\*(.+?)\\*\\*/g, \"<strong>$1</strong>\")" in source
+    assert 'bodyEl.innerHTML = formatReportQaRichText(turn.content || "-");' in source
 
 
 def test_financial_report_template_rolls_back_user_turn_when_qa_request_fails() -> None:

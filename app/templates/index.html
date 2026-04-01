@@ -730,6 +730,21 @@
         margin-top: 4px;
       }
 
+      .report-qa-older-toggle {
+        margin: 8px 0 2px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .report-qa-older-toggle:hover {
+        text-decoration: underline;
+      }
+
       .report-qa-input-row {
         display: flex;
         flex-wrap: wrap;
@@ -1107,6 +1122,7 @@
               </div>
             </div>
             <div id="reportQaChipList" class="chip-list" aria-label="Guided report questions"></div>
+            <button id="reportQaOlderToggle" class="report-qa-older-toggle" hidden type="button"></button>
             <div id="reportQaTranscript" class="report-qa-transcript" aria-live="polite"></div>
             <div class="report-qa-input-row">
               <input
@@ -1217,6 +1233,7 @@
       const reportLlmAnalysisEl = document.getElementById("reportLlmAnalysis");
       const reportQaSessionLabelEl = document.getElementById("reportQaSessionLabel");
       const reportQaChipListEl = document.getElementById("reportQaChipList");
+      const reportQaOlderToggleEl = document.getElementById("reportQaOlderToggle");
       const reportQaTranscriptEl = document.getElementById("reportQaTranscript");
       const reportQaInputEl = document.getElementById("reportQaInput");
       const reportQaAskBtn = document.getElementById("reportQaAskBtn");
@@ -1238,6 +1255,7 @@
         history: [],
         sessionSummary: "",
       };
+      let reportQaShowOlderTurns = false;
       const llmStorageKey = "investmentAssistantLlmConfigV1";
       const guidedReportQuestions = [
         "今年利润增长主要来自哪里？",
@@ -1328,6 +1346,12 @@
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
           .replace(/>/g, "&gt;");
+      }
+
+      function formatReportQaRichText(value) {
+        return escapeHtml(value)
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\n/g, "<br>");
       }
 
       function isBackendUnreachable(err) {
@@ -1637,8 +1661,19 @@
         });
       }
 
+      function countReportQaPairs(turns) {
+        return (turns || []).filter((turn) => turn && turn.role === "user").length;
+      }
+
       function renderReportQaTranscript() {
         reportQaTranscriptEl.innerHTML = "";
+        const olderTurns = reportQaSession.history.slice(0, -6);
+        const olderPairCount = countReportQaPairs(olderTurns);
+        const visibleTurns = reportQaShowOlderTurns ? reportQaSession.history : reportQaSession.history.slice(-6);
+        reportQaOlderToggleEl.hidden = olderTurns.length === 0;
+        reportQaOlderToggleEl.textContent = reportQaShowOlderTurns
+          ? `Hide older Q&A pairs (${olderPairCount})`
+          : `Show older Q&A pairs (${olderPairCount})`;
 
         if (!reportQaSession.history.length) {
           const emptyEl = document.createElement("div");
@@ -1650,7 +1685,7 @@
           return;
         }
 
-        reportQaSession.history.forEach((turn, index) => {
+        visibleTurns.forEach((turn, index) => {
           const role = turn.role === "assistant" ? "assistant" : turn.role === "system" ? "system" : "user";
           const turnEl = document.createElement("div");
           turnEl.className = `report-qa-turn ${role}`;
@@ -1696,7 +1731,7 @@
 
           const bodyEl = document.createElement("div");
           bodyEl.className = "report-qa-turn-body";
-          bodyEl.textContent = turn.content || "-";
+          bodyEl.innerHTML = formatReportQaRichText(turn.content || "-");
           turnEl.appendChild(headEl);
           turnEl.appendChild(bodyEl);
 
@@ -1736,6 +1771,7 @@
       }
 
       function resetReportQaSession({ symbol = null, reportKey = null, label = "" } = {}) {
+        reportQaShowOlderTurns = false;
         reportQaSession = {
           symbol: symbol || null,
           reportKey: reportKey || null,
@@ -1762,7 +1798,6 @@
           mode: payload.mode || "",
           session_reset: Boolean(payload.session_reset),
         });
-        reportQaSession.history = reportQaSession.history.slice(-6);
         renderReportQaTranscript();
       }
 
@@ -2349,7 +2384,7 @@
               symbol: reportQaSession.symbol,
               report_key: reportQaSession.reportKey,
               question,
-              history: reportQaSession.history.map((turn) => ({
+              history: reportQaSession.history.slice(-6).map((turn) => ({
                 role: turn.role,
                 content: turn.content,
               })),
@@ -2652,6 +2687,10 @@
       reportQaAskBtn.addEventListener("click", askActiveReport);
       reportQaInputEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.isComposing) askActiveReport();
+      });
+      reportQaOlderToggleEl.addEventListener("click", () => {
+        reportQaShowOlderTurns = !reportQaShowOlderTurns;
+        renderReportQaTranscript();
       });
       reportCodeInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") loadFinancialReport();
