@@ -112,6 +112,11 @@ Primary recommendation:
 Secondary recommendation:
 - Manually smoke-test `Auto Read Annual Report` on a known symbol once the upstream disclosure endpoints resolve.
 
+Current design work:
+- Report Q&A design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-01-report-qa-design.md`.
+- Matching cc-sdd spec scaffold added under `/Users/brenda/Projects/investment_assistant/.kiro/specs/report-qa/`.
+- Next gated step is user review of the written spec before implementation planning.
+
 Current design decision:
 - LLM-backed annual-report auto-read will use browser `localStorage` plus backend session-memory configuration.
 - See `/Users/brenda/Projects/investment_assistant/docs/decisions/2026-03-31-llm-autoread-config.md`.
