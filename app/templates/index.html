@@ -602,6 +602,147 @@
         margin-top: 4px;
       }
 
+      .report-qa-section {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 10px;
+        margin: 10px 0;
+      }
+
+      .report-qa-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 8px 0 10px;
+      }
+
+      .chip-button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #fff;
+        color: #334155;
+        font-family: "Fira Sans", "PingFang SC", sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 12px;
+      }
+
+      .chip-button:hover:not(:disabled) {
+        background: #f8fbff;
+      }
+
+      .chip-button:disabled {
+        opacity: 0.55;
+      }
+
+      .report-qa-transcript {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .report-qa-empty {
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        background: #fff;
+        color: #64748b;
+        font-size: 13px;
+        padding: 10px;
+      }
+
+      .report-qa-turn {
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px;
+      }
+
+      .report-qa-turn.user {
+        background: #f8fafc;
+      }
+
+      .report-qa-turn.assistant {
+        border-color: #bbf7d0;
+        background: #f0fdf4;
+      }
+
+      .report-qa-turn.system {
+        border-color: #fed7aa;
+        background: #fff7ed;
+      }
+
+      .report-qa-turn-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+
+      .report-qa-role {
+        color: #1e3a8a;
+        font-family: "Fira Code", monospace;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+
+      .report-qa-turn-body {
+        color: #334155;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .report-qa-turn-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .report-qa-turn-meta .status {
+        font-size: 11px;
+        padding: 2px 8px;
+      }
+
+      .report-qa-turn-evidence,
+      .report-qa-turn-citations {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .report-qa-turn-evidence li + li,
+      .report-qa-turn-citations li + li {
+        margin-top: 4px;
+      }
+
+      .report-qa-input-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 10px;
+      }
+
+      .report-qa-input-row input {
+        flex: 1;
+        min-width: 240px;
+      }
+
       .report-meta-row {
         display: flex;
         flex-wrap: wrap;
@@ -958,6 +1099,26 @@
           <div id="reportAutoreadList" class="report-insight-list"></div>
           <h3>LLM Reading Notes</h3>
           <div id="reportLlmAnalysis" class="report-insight-list"></div>
+          <section id="reportQaSection" class="report-qa-section">
+            <div class="report-qa-head">
+              <div>
+                <h3>Ask the Report</h3>
+                <div class="tiny-note" id="reportQaSessionLabel">Load or auto-read an annual report before asking questions.</div>
+              </div>
+            </div>
+            <div id="reportQaChipList" class="chip-list" aria-label="Guided report questions"></div>
+            <div id="reportQaTranscript" class="report-qa-transcript" aria-live="polite"></div>
+            <div class="report-qa-input-row">
+              <input
+                id="reportQaInput"
+                type="text"
+                placeholder="Ask about the active annual report..."
+                aria-label="Ask the report"
+                disabled
+              />
+              <button id="reportQaAskBtn" disabled>Ask</button>
+            </div>
+          </section>
           <h3>Extraction Evidence</h3>
           <div id="reportEvidenceList" class="report-insight-list"></div>
 
@@ -1054,6 +1215,11 @@
       const reportInsightListEl = document.getElementById("reportInsightList");
       const reportAutoreadListEl = document.getElementById("reportAutoreadList");
       const reportLlmAnalysisEl = document.getElementById("reportLlmAnalysis");
+      const reportQaSessionLabelEl = document.getElementById("reportQaSessionLabel");
+      const reportQaChipListEl = document.getElementById("reportQaChipList");
+      const reportQaTranscriptEl = document.getElementById("reportQaTranscript");
+      const reportQaInputEl = document.getElementById("reportQaInput");
+      const reportQaAskBtn = document.getElementById("reportQaAskBtn");
       const reportEvidenceListEl = document.getElementById("reportEvidenceList");
       const reportDetailTableBody = document.querySelector("#reportDetailTable tbody");
 
@@ -1066,7 +1232,21 @@
       let macroLoadedOnce = false;
       let industryLoadedOnce = false;
       let reportLoadedOnce = false;
+      let reportQaSession = {
+        symbol: null,
+        reportKey: null,
+        history: [],
+        sessionSummary: "",
+      };
       const llmStorageKey = "investmentAssistantLlmConfigV1";
+      const guidedReportQuestions = [
+        "今年利润增长主要来自哪里？",
+        "经营现金流和净利润匹配吗？",
+        "资本开支压力大吗？",
+        "管理层最担心哪些风险？",
+        "为什么你认为净利润较为真实？",
+        "哪些因素会削弱利润可持续性？",
+      ];
       const macroTableLabelMap = {
         macro_indicators: "Production Macro (macro_indicators)",
         macro_indicators_step1: "Core Macro (5 indicators)",
@@ -1416,6 +1596,174 @@
           `;
           reportLlmAnalysisEl.appendChild(noteEl);
         });
+      }
+
+      function reportQaHasActiveSession() {
+        return Boolean(reportQaSession.symbol && reportQaSession.reportKey);
+      }
+
+      function reportQaConfidenceClass(confidence) {
+        const value = String(confidence || "").toLowerCase();
+        if (value === "high") return "ok";
+        if (value === "medium") return "warn";
+        if (value === "low") return "bad";
+        return "";
+      }
+
+      function renderReportQaGuidedQuestions() {
+        reportQaChipListEl.innerHTML = "";
+        guidedReportQuestions.forEach((question, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "chip-button";
+          button.textContent = question;
+          button.setAttribute("data-report-qa-chip", String(index));
+          button.disabled = !reportQaHasActiveSession();
+          button.addEventListener("click", () => {
+            if (!reportQaHasActiveSession()) return;
+            reportQaInputEl.value = question;
+            reportQaInputEl.focus();
+          });
+          reportQaChipListEl.appendChild(button);
+        });
+      }
+
+      function syncReportQaControls() {
+        const enabled = reportQaHasActiveSession();
+        reportQaInputEl.disabled = !enabled;
+        reportQaAskBtn.disabled = !enabled;
+        reportQaChipListEl.querySelectorAll("button").forEach((button) => {
+          button.disabled = !enabled;
+        });
+      }
+
+      function renderReportQaTranscript() {
+        reportQaTranscriptEl.innerHTML = "";
+
+        if (!reportQaSession.history.length) {
+          const emptyEl = document.createElement("div");
+          emptyEl.className = "report-qa-empty";
+          emptyEl.textContent = reportQaHasActiveSession()
+            ? "Ask a question or use a guided chip to start the conversation for this report."
+            : "Load or auto-read an annual report before asking questions.";
+          reportQaTranscriptEl.appendChild(emptyEl);
+          return;
+        }
+
+        reportQaSession.history.forEach((turn, index) => {
+          const role = turn.role === "assistant" ? "assistant" : turn.role === "system" ? "system" : "user";
+          const turnEl = document.createElement("div");
+          turnEl.className = `report-qa-turn ${role}`;
+          turnEl.setAttribute("data-report-qa-role", role);
+          turnEl.setAttribute("data-report-qa-index", String(index));
+
+          const headEl = document.createElement("div");
+          headEl.className = "report-qa-turn-head";
+
+          const roleEl = document.createElement("span");
+          roleEl.className = "report-qa-role";
+          roleEl.textContent = role === "assistant" ? "Assistant" : role === "system" ? "System" : "You";
+          headEl.appendChild(roleEl);
+
+          const metaEl = document.createElement("div");
+          metaEl.className = "report-qa-turn-meta";
+
+          if (role === "assistant" && turn.mode) {
+            const modeBadge = document.createElement("span");
+            modeBadge.className = "status";
+            modeBadge.textContent = turn.mode;
+            metaEl.appendChild(modeBadge);
+          }
+
+          if (role === "assistant" && turn.confidence) {
+            const confidenceBadge = document.createElement("span");
+            const confidenceClass = reportQaConfidenceClass(turn.confidence);
+            confidenceBadge.className = confidenceClass ? `status ${confidenceClass}` : "status";
+            confidenceBadge.textContent = `Confidence: ${turn.confidence}`;
+            metaEl.appendChild(confidenceBadge);
+          }
+
+          if (turn.session_reset) {
+            const resetBadge = document.createElement("span");
+            resetBadge.className = "status warn";
+            resetBadge.textContent = "Session reset";
+            metaEl.appendChild(resetBadge);
+          }
+
+          if (metaEl.childNodes.length) {
+            headEl.appendChild(metaEl);
+          }
+
+          const bodyEl = document.createElement("div");
+          bodyEl.className = "report-qa-turn-body";
+          bodyEl.textContent = turn.content || "-";
+          turnEl.appendChild(headEl);
+          turnEl.appendChild(bodyEl);
+
+          if (role === "assistant" && Array.isArray(turn.evidence) && turn.evidence.length) {
+            const evidenceEl = document.createElement("ul");
+            evidenceEl.className = "report-qa-turn-evidence";
+            turn.evidence.forEach((item) => {
+              const li = document.createElement("li");
+              li.textContent = typeof item === "string" ? item : item?.snippet || item?.content || JSON.stringify(item);
+              evidenceEl.appendChild(li);
+            });
+            turnEl.appendChild(evidenceEl);
+          }
+
+          if (role === "assistant" && Array.isArray(turn.citations) && turn.citations.length) {
+            const citationsEl = document.createElement("ul");
+            citationsEl.className = "report-qa-turn-citations";
+            turn.citations.forEach((item) => {
+              const li = document.createElement("li");
+              const citationText =
+                typeof item === "string"
+                  ? item
+                  : item?.snippet || item?.text || item?.content || item?.source || "-";
+              const citationUrl = typeof item === "object" && item ? item.url || item.source_url || item.href : "";
+              if (citationUrl) {
+                li.innerHTML = `<a href="${escapeHtmlAttribute(citationUrl)}" target="_blank" rel="noreferrer">${escapeHtml(citationText)}</a>`;
+              } else {
+                li.textContent = citationText;
+              }
+              citationsEl.appendChild(li);
+            });
+            turnEl.appendChild(citationsEl);
+          }
+
+          reportQaTranscriptEl.appendChild(turnEl);
+        });
+      }
+
+      function resetReportQaSession({ symbol = null, reportKey = null, label = "" } = {}) {
+        reportQaSession = {
+          symbol: symbol || null,
+          reportKey: reportKey || null,
+          history: [],
+          sessionSummary: "",
+        };
+        reportQaInputEl.value = "";
+        reportQaSessionLabelEl.textContent =
+          label ||
+          (reportQaHasActiveSession()
+            ? "Started a new Q&A session for the active report."
+            : "Load or auto-read an annual report before asking questions.");
+        syncReportQaControls();
+        renderReportQaTranscript();
+      }
+
+      function appendReportQaTurn(role, content, payload = {}) {
+        reportQaSession.history.push({
+          role,
+          content,
+          evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
+          citations: Array.isArray(payload.citations) ? payload.citations : [],
+          confidence: payload.confidence || "",
+          mode: payload.mode || "",
+          session_reset: Boolean(payload.session_reset),
+        });
+        reportQaSession.history = reportQaSession.history.slice(-6);
+        renderReportQaTranscript();
       }
 
       function readLlmFormConfig() {
@@ -1807,6 +2155,11 @@
 
         loadReportBtn.disabled = true;
         resetFinancialReportPanel();
+        resetReportQaSession({
+          symbol: code,
+          reportKey: null,
+          label: "Load or auto-read an annual report before asking questions.",
+        });
         reportStatusEl.textContent = "Loading financial reports...";
 
         try {
@@ -1842,15 +2195,21 @@
           return;
         }
 
+        const reportSymbol = /^\d{6}$/.test(reportCodeInput.value.trim()) ? reportCodeInput.value.trim() : null;
         analyzeReportUrlBtn.disabled = true;
         resetFinancialReportPanel();
+        resetReportQaSession({
+          symbol: reportSymbol,
+          reportKey: null,
+          label: "Load or auto-read an annual report before asking questions.",
+        });
         reportStatusEl.textContent = "Fetching and parsing report URL...";
 
         try {
           const res = await fetch(`${apiBase}/api/financial-report-url-analysis`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify(reportSymbol ? { url, symbol: reportSymbol } : { url }),
           });
           const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
@@ -1868,6 +2227,16 @@
           reportSourceMetaEl.textContent = `${sourceTitle}${pageText}${tlsText}Content-Type: ${data.content_type || "-"}.`;
           renderReportCurrentMode(null);
           renderReportLlmStatus({ llm_enabled: false, llm_used: false });
+          const reportKey = data.report_key || data.session_key || null;
+          const activeSymbol = data.symbol || reportSymbol;
+          if (activeSymbol) {
+            reportCodeInput.value = activeSymbol;
+          }
+          resetReportQaSession({
+            symbol: activeSymbol,
+            reportKey,
+            label: reportKey ? "Started a new Q&A session for the active report." : "Load or auto-read an annual report before asking questions.",
+          });
           reportStatusEl.textContent = `URL parsed successfully. As of: ${analysis.as_of || "-"}.`;
         } catch (err) {
           resetFinancialReportPanel();
@@ -1890,6 +2259,11 @@
 
         autoReadReportBtn.disabled = true;
         resetFinancialReportPanel();
+        resetReportQaSession({
+          symbol: code,
+          reportKey: null,
+          label: "Load or auto-read an annual report before asking questions.",
+        });
         reportStatusEl.textContent = "Locating and reading the latest annual report...";
 
         try {
@@ -1901,6 +2275,19 @@
           renderReportCurrentMode(data.current_mode || null);
           renderReportLlmStatus(data);
           renderReportLlmAnalysis(data.llm_analysis || null);
+
+          const reportKey = data.report_key || data.session_key || null;
+          const reportSymbol = data.symbol || reportCodeInput.value.trim() || null;
+          if (reportSymbol) {
+            reportCodeInput.value = reportSymbol;
+          }
+          resetReportQaSession({
+            symbol: reportSymbol,
+            reportKey,
+            label: reportKey
+              ? `Q&A Session: ${reportSymbol || data.symbol || "Active report"} / ${data.report?.title || "Active annual report"}`
+              : "Load or auto-read an annual report before asking questions.",
+          });
 
           const reportTitle = data.report?.title ? `Title: ${escapeHtmlAttribute(data.report.title)}. ` : "";
           const reportDate = data.report?.published_at
@@ -1933,6 +2320,67 @@
           }
         } finally {
           autoReadReportBtn.disabled = false;
+        }
+      }
+
+      async function askActiveReport() {
+        const question = reportQaInputEl.value.trim();
+        if (!question) {
+          reportQaSessionLabelEl.textContent = reportQaHasActiveSession()
+            ? "Ask a question or use a guided chip to start the conversation for this report."
+            : "Load or auto-read an annual report before asking questions.";
+          return;
+        }
+        if (!reportQaHasActiveSession()) {
+          reportQaSessionLabelEl.textContent = "Load or auto-read an annual report before asking questions.";
+          return;
+        }
+
+        const previousHistorySnapshot = reportQaSession.history.map((turn) => ({ ...turn }));
+        appendReportQaTurn("user", question);
+        reportQaAskBtn.disabled = true;
+        reportQaInputEl.disabled = true;
+
+        try {
+          const res = await fetch(`${apiBase}/api/financial-report-qa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              symbol: reportQaSession.symbol,
+              report_key: reportQaSession.reportKey,
+              question,
+              history: reportQaSession.history.map((turn) => ({
+                role: turn.role,
+                content: turn.content,
+              })),
+              session_summary: reportQaSession.sessionSummary,
+              use_llm: true,
+            }),
+          });
+          const data = await parseJsonResponse(res, "Financial report Q&A endpoint");
+          if (!res.ok) throw new Error(data.detail || "Request failed");
+
+          reportQaSession.sessionSummary = data.updated_session_summary || reportQaSession.sessionSummary;
+          appendReportQaTurn("assistant", data.short_answer || "-", {
+            evidence: data.evidence || [],
+            citations: data.citations || [],
+            confidence: data.confidence || "",
+            mode: data.mode || "",
+            session_reset: data.session_reset,
+          });
+          renderReportQaTranscript();
+          reportQaInputEl.value = "";
+        } catch (err) {
+          reportQaSession.history = previousHistorySnapshot;
+          renderReportQaTranscript();
+          if (isBackendUnreachable(err)) {
+            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            reportStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          syncReportQaControls();
+          reportQaInputEl.focus();
         }
       }
 
@@ -2200,6 +2648,11 @@
       [llmProviderInput, llmBaseUrlInput, llmModelInput, llmApiKeyInput].forEach((inputEl) => {
         inputEl.addEventListener("input", persistLlmConfigToLocalStorage);
       });
+      renderReportQaGuidedQuestions();
+      reportQaAskBtn.addEventListener("click", askActiveReport);
+      reportQaInputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing) askActiveReport();
+      });
       reportCodeInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") loadFinancialReport();
       });
@@ -2211,6 +2664,11 @@
       resetMetrics();
       hydrateLlmFormFromLocalStorage();
       resetFinancialReportPanel();
+      resetReportQaSession({
+        symbol: null,
+        reportKey: null,
+        label: "Load or auto-read an annual report before asking questions.",
+      });
       loadLlmSessionStatus();
       loadMacroIndicators();
       macroLoadedOnce = true;
