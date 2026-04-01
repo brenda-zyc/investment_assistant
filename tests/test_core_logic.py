@@ -287,6 +287,24 @@ def test_compute_financial_report_autoread_assessment_positive_case() -> None:
     assert answer_map["capital_intensity"]["verdict"] == "资本投入压力较低"
     assert payload["derived_metrics"]["cash_conversion"] == 1.2
     assert payload["derived_metrics"]["recurring_profit_ratio"] == 0.9
+    assert "最新经营现金流 = 12.00元（约0.00亿元）。" in answer_map["profit_sustainability"]["evidence"]
+
+
+def test_compute_financial_report_autoread_assessment_formats_large_currency_evidence_readably() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={},
+        historical_context={
+            "revenue": [("2024-12-31", 120_000_000_000.0)],
+            "net_profit": [("2024-12-31", 20_000_000_000.0)],
+            "roe": [("2024-12-31", 15.5)],
+            "deducted_net_profit": [("2024-12-31", 18_000_000_000.0)],
+            "operating_cash_flow": [("2024-12-31", 75_429_516_296.0)],
+            "capex_cash_outflow": [("2024-12-31", 9_300_000_000.0)],
+        },
+    )
+
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert "最新经营现金流 = 75,429,516,296.00元（约754.30亿元）。" in answer_map["profit_sustainability"]["evidence"]
 
 
 def test_compute_financial_report_autoread_assessment_insufficient_case() -> None:

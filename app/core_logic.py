@@ -13,6 +13,11 @@ def to_float(value: object) -> float | None:
         return None
 
 
+def _format_amount_readable(value: float) -> str:
+    """Format large financial amounts in yuan with an easier-to-read yi-yuan companion label."""
+    return f"{value:,.2f}元（约{value / 100_000_000:,.2f}亿元）"
+
+
 def compute_latest_close_percentile(price_rows: list[dict]) -> int | None:
     """Compute percentile of latest close within stored close history."""
     if not price_rows:
@@ -468,7 +473,7 @@ def compute_financial_report_autoread_assessment(
 
     if operating_cash_flow_latest is not None:
         sustainability_signal_count += 1
-        sustainability_evidence.append(f"最新经营现金流 = {operating_cash_flow_latest:.2f}。")
+        sustainability_evidence.append(f"最新经营现金流 = {_format_amount_readable(operating_cash_flow_latest)}。")
         if operating_cash_flow_latest > 0:
             sustainability_score += 5
         else:
