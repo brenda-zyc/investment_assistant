@@ -527,7 +527,7 @@ def fetch_report_text_from_url(
     url: str,
     timeout_sec: int = 12,
     max_bytes: int = 2_500_000,
-    pdf_max_bytes: int = 60_000_000,
+    pdf_max_bytes: int = 120_000_000,
 ) -> dict[str, Any]:
     """Fetch report page text from URL, with basic safety guards."""
     parsed = urlparse(url.strip())
