@@ -115,7 +115,8 @@ Secondary recommendation:
 Current design work:
 - Report Q&A design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-01-report-qa-design.md`.
 - Matching cc-sdd spec scaffold added under `/Users/brenda/Projects/investment_assistant/.kiro/specs/report-qa/`.
-- Next gated step is user review of the written spec before implementation planning.
+- Implementation plan saved at `/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-01-report-qa.md`.
+- Report Q&A implementation will use an in-memory report-context cache keyed by `report_key`; chat transcript remains frontend-only.
 
 Current design decision:
 - LLM-backed annual-report auto-read will use browser `localStorage` plus backend session-memory configuration.
