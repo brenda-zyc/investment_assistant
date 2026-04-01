@@ -10,6 +10,7 @@ from app.services.financial_report_service import (
     fetch_report_text_from_url,
     find_latest_annual_report,
 )
+from app.services.report_qa_service import build_report_key, store_report_context
 from app.services.llm_service import get_effective_llm_config, interpret_annual_report_text
 from app.services.market_data_service import (
     fetch_financial_summary,
@@ -49,7 +50,7 @@ def get_financial_report_analysis(symbol: str) -> dict:
     return analysis_payload
 
 
-def analyze_financial_report_url(url: str) -> dict:
+def analyze_financial_report_url(url: str, symbol: str | None = None) -> dict:
     """Analyze a Chinese financial report link and return extracted metrics."""
     fetched = fetch_report_text_from_url(url)
 
@@ -96,12 +97,26 @@ def analyze_financial_report_url(url: str) -> dict:
             *analysis_payload.get("highlights", []),
         ]
 
+    report_key = _cache_active_report_context(
+        symbol=symbol,
+        report={
+            "document_url": fetched["url"],
+            "detail_url": None,
+            "title": fetched.get("title"),
+            "content_type": fetched.get("content_type"),
+        },
+        report_text=fetched.get("text"),
+        extracted_metrics=extracted,
+        answers=[],
+        llm_analysis=None,
+    )
     return {
         "source_url": fetched["url"],
         "source_title": fetched.get("title"),
         "content_type": fetched.get("content_type"),
         "pdf_pages": fetched.get("pdf_pages"),
         "tls_insecure": fetched.get("tls_insecure"),
+        "report_key": report_key,
         "analysis": analysis_payload,
         "extracted": extracted,
     }
@@ -137,6 +152,37 @@ def _has_usable_report_metrics(extracted_metrics: dict | None) -> bool:
         if extracted_metrics.get(key) is not None:
             return True
     return False
+
+
+def _cache_active_report_context(
+    *,
+    symbol: str | None,
+    report: dict | None,
+    report_text: str | None,
+    extracted_metrics: dict | None,
+    answers: list[dict] | None,
+    llm_analysis: dict | None,
+) -> str | None:
+    """Cache the active report context and return its report key when available."""
+    if not symbol or not report_text:
+        return None
+
+    report_key = build_report_key(symbol, report)
+    if not report_key:
+        return None
+
+    store_report_context(
+        report_key,
+        {
+            "symbol": symbol,
+            "report": dict(report or {}),
+            "report_text": report_text,
+            "extracted_metrics": extracted_metrics or {},
+            "answers": answers or [],
+            "llm_analysis": llm_analysis,
+        },
+    )
+    return report_key
 
 
 def autonomous_financial_report_read(symbol: str) -> dict:
@@ -193,11 +239,20 @@ def autonomous_financial_report_read(symbol: str) -> dict:
         except Exception as exc:
             warnings.append(f"LLM interpretation failed. Reason: {exc}")
     # TODO: Add optional LLM synthesis when a model provider is configured in this repo.
+    report_key = _cache_active_report_context(
+        symbol=symbol,
+        report=report_meta,
+        report_text=fetched_report.get("text") if fetched_report else None,
+        extracted_metrics=extracted_metrics,
+        answers=assessment.get("answers", []),
+        llm_analysis=llm_analysis,
+    )
     return {
         "symbol": symbol,
         "symbol_name": symbol_name,
         "analysis_mode": "rule_based",
         "current_mode": current_mode,
+        "report_key": report_key,
         "llm_enabled": bool(llm_config),
         "llm_used": llm_used,
         "llm_provider": llm_config.get("provider") if llm_config else None,

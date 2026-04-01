@@ -19,6 +19,7 @@ router = APIRouter()
 
 class FinancialReportUrlRequest(BaseModel):
     url: str
+    symbol: str | None = None
 
 
 class LlmSessionConfigRequest(BaseModel):
@@ -41,8 +42,15 @@ def financial_report_analysis(symbol: str = Query(..., description="6-digit A-sh
 @router.post("/api/financial-report-url-analysis")
 def financial_report_url_analysis(payload: FinancialReportUrlRequest) -> dict:
     """Analyze a Chinese financial report web link and return extracted metrics."""
+    normalized_symbol: str | None = None
+    if payload.symbol is not None:
+        try:
+            normalized_symbol = normalize_stock_code(payload.symbol)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     try:
-        return analyze_financial_report_url(payload.url)
+        return analyze_financial_report_url(payload.url, symbol=normalized_symbol)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

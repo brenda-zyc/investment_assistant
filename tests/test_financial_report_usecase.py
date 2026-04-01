@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import app.services.report_qa_service as report_qa_service
 from app.usecases import financial_report_usecase
 
 
 def test_autonomous_financial_report_read_returns_partial_payload_on_report_failure(monkeypatch) -> None:
     """Usecase should keep a stable payload when report discovery/fetch partially fails."""
+    report_qa_service.clear_report_context_cache()
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(
         financial_report_usecase,
@@ -58,14 +60,20 @@ def test_autonomous_financial_report_read_returns_partial_payload_on_report_fail
     assert payload["llm_enabled"] is False
     assert payload["current_mode"] == "report_text_extracted"
     assert payload["llm_used"] is False
+    assert payload["report_key"] == "000333|http://example.com/report.pdf"
     assert payload["report"]["title"] == "2024年年度报告"
     assert len(payload["answers"]) == 3
     assert all("question" in item for item in payload["answers"])
     assert payload["warnings"] == []
+    cached_context = report_qa_service.get_cached_report_context(payload["report_key"])
+    assert cached_context is not None
+    assert cached_context["symbol"] == "000333"
+    assert cached_context["report"]["document_url"] == "http://example.com/report.pdf"
 
 
 def test_autonomous_financial_report_read_returns_insufficient_answers_when_sources_fail(monkeypatch) -> None:
     """Usecase should degrade to explicit insufficient-data answers instead of crashing."""
+    report_qa_service.clear_report_context_cache()
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {})
 
@@ -91,6 +99,7 @@ def test_autonomous_financial_report_read_returns_insufficient_answers_when_sour
 
 def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_config_exist(monkeypatch) -> None:
     """Usecase should attach LLM interpretation when report text exists and a session config is available."""
+    report_qa_service.clear_report_context_cache()
     monkeypatch.setattr(
         financial_report_usecase,
         "fetch_stock_names",
@@ -167,6 +176,7 @@ def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_
 
 def test_autonomous_financial_report_read_falls_back_when_llm_interpretation_fails(monkeypatch) -> None:
     """Usecase should keep rule-based output when the configured LLM call fails."""
+    report_qa_service.clear_report_context_cache()
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda symbols: {symbols[0]: "美的集团"})
     monkeypatch.setattr(
         financial_report_usecase,
@@ -230,6 +240,7 @@ def test_autonomous_financial_report_read_falls_back_when_llm_interpretation_fai
 
 def test_autonomous_financial_report_read_prefers_report_meta_title_for_pdf_extraction(monkeypatch) -> None:
     """Usecase should pass the disclosure title, not the PDF filename, into text extraction heuristics."""
+    report_qa_service.clear_report_context_cache()
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda symbols: {symbols[0]: "美的集团"})
     monkeypatch.setattr(
@@ -279,3 +290,91 @@ def test_autonomous_financial_report_read_prefers_report_meta_title_for_pdf_extr
     financial_report_usecase.autonomous_financial_report_read("000333")
 
     assert captured["title"] == "2025年年度报告"
+
+
+def test_analyze_financial_report_url_returns_report_key_and_caches_context(monkeypatch) -> None:
+    """URL analysis should expose a report key and store the active report context for follow-up Q&A."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda url: {
+            "url": url,
+            "text": "2024年年度报告。营业收入100亿元，归属于上市公司股东的净利润10亿元。",
+            "content_type": "application/pdf",
+            "pdf_pages": 188,
+            "tls_insecure": False,
+            "title": "2024年年度报告",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_financial_row_from_report_text",
+        lambda _text, title=None: {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 100000000000.0,
+            "net_profit": 10000000000.0,
+            "roe": 16.0,
+            "debt_ratio": 45.0,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+
+    payload = financial_report_usecase.analyze_financial_report_url(
+        "https://example.com/report.pdf",
+        symbol="000333",
+    )
+
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
+    cached_context = report_qa_service.get_cached_report_context(payload["report_key"])
+    assert cached_context is not None
+    assert cached_context["symbol"] == "000333"
+    assert cached_context["report"]["document_url"] == "https://example.com/report.pdf"
+    assert cached_context["report_text"].startswith("2024年年度报告")
+
+
+def test_analyze_financial_report_url_returns_none_report_key_when_report_text_is_empty(monkeypatch) -> None:
+    """URL analysis should not advertise a report key when no active context was cached."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda url: {
+            "url": url,
+            "text": "",
+            "content_type": "application/pdf",
+            "pdf_pages": 188,
+            "tls_insecure": False,
+            "title": "2024年年度报告",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_financial_row_from_report_text",
+        lambda _text, title=None: {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": None,
+            "net_profit": None,
+            "roe": None,
+            "debt_ratio": None,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+
+    payload = financial_report_usecase.analyze_financial_report_url(
+        "https://example.com/report.pdf",
+        symbol="000333",
+    )
+
+    assert payload["report_key"] is None
+    assert report_qa_service.get_cached_report_context("000333|https://example.com/report.pdf") is None
