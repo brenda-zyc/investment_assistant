@@ -60,41 +60,25 @@ Build a local A-share investment analysis app with:
   - session save/status endpoint
   - test-connection endpoint
   - optional `LLM Reading Notes` block in the Financial Reports UI
+- Implemented report-scoped Q&A in the `codex/report-qa` worktree:
+  - in-memory report-context cache keyed by `report_key`
+  - bounded Q&A history with frontend-owned transcript state
+  - `POST /api/financial-report-qa`
+  - inline `Ask the Report` panel with guided question chips
+  - automatic Q&A session reset when the active report changes
+  - separated commits:
+    - `27b3e94` `feat(report-qa): cache active report contexts`
+    - `5772138` `fix(report-qa): harden report context cache`
+    - `d43bacd` `feat(report-qa): add bounded answer modes and llm wrapper`
+    - `a304b5a` `fix(report-qa): broaden report-scoped fallback handling`
+    - `be61c5d` `feat(report-qa): add api and usecase orchestration`
+    - `fa632e9` `feat(report-qa): add inline ask-the-report ui`
 - Added a standing documentation rule:
   - important architecture, storage, security, provider, and fallback decisions must be recorded under `/Users/brenda/Projects/investment_assistant/docs/decisions/`
 
 ## In-Progress Changes
-
-- Modified but not yet committed:
-  - `/Users/brenda/Projects/investment_assistant/docs/decisions/2026-03-31-llm-autoread-config.md`
-  - `/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-03-31-llm-autoread-enhancement.md`
-  - `/Users/brenda/Projects/investment_assistant/TESTING.md`
-  - `/Users/brenda/Projects/investment_assistant/docs/agent_mode.md`
-  - `/Users/brenda/Projects/investment_assistant/docs/thread_workflow.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/financial-report-autoread/requirements.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/financial-report-autoread/design.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/financial-report-autoread/tasks.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/llm-autoread-enhancement/requirements.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/llm-autoread-enhancement/design.md`
-  - `/Users/brenda/Projects/investment_assistant/.kiro/specs/llm-autoread-enhancement/tasks.md`
-  - `/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py`
-  - `/Users/brenda/Projects/investment_assistant/app/core_logic.py`
-  - `/Users/brenda/Projects/investment_assistant/app/main.py`
-  - `/Users/brenda/Projects/investment_assistant/app/services/common.py`
-  - `/Users/brenda/Projects/investment_assistant/app/services/financial_report_service.py`
-  - `/Users/brenda/Projects/investment_assistant/app/services/llm_service.py`
-  - `/Users/brenda/Projects/investment_assistant/app/services/market_data_service.py`
-  - `/Users/brenda/Projects/investment_assistant/app/templates/index.html`
-  - `/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py`
-  - `/Users/brenda/Projects/investment_assistant/app/usecases/market_usecase.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_core_logic.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_llm_service.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_market_usecase.py`
-  - `/Users/brenda/Projects/investment_assistant/tests/test_report_text_parser.py`
-- Current branch:
-  - `main`
+- Current active implementation branch:
+  - `codex/report-qa` in `/Users/brenda/Projects/investment_assistant/.worktrees/report-qa`
 
 ## Open Risks
 
@@ -103,6 +87,8 @@ Build a local A-share investment analysis app with:
 - Current fallback design improves availability, but not latency.
 - New symbols can still be slow because the app tries fresh upstream fetches before settling on cached fallback data.
 - `Warning` currently means partial upstream failure with degraded fallback, not complete failure.
+- Report-Q&A scope detection is still heuristic. It now rejects obvious market-data questions, but unusual phrasing may still need future tightening.
+- `Load Financial Report` still leaves Q&A disabled by design because that path does not load report text.
 
 ## Next Step
 
@@ -110,7 +96,11 @@ Primary recommendation:
 - Add DNS preflight and fast-fail logic in market data fetch paths to reduce slow retries.
 
 Secondary recommendation:
-- Manually smoke-test `Auto Read Annual Report` on a known symbol once the upstream disclosure endpoints resolve.
+- Manually smoke-test report Q&A on at least two symbols once the `codex/report-qa` branch is running locally.
+
+Suggested smoke path:
+- `000333` -> `Auto Read Annual Report` -> ask one guided question -> verify answer/evidence/citations render
+- switch to `600900` -> verify the transcript resets immediately and starts a fresh session
 
 Current design work:
 - Report Q&A design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-01-report-qa-design.md`.
@@ -128,6 +118,9 @@ Current implementation note:
   - local browser config
   - explicit `Save for this session`
   - available report text from the fetched annual report
+- Report-Q&A backend/frontend verification completed in the worktree with:
+  - `77 passed`
+  - `python3 -m compileall app`
 
 Operational note:
 - New threads should also read `/Users/brenda/Projects/investment_assistant/docs/agent_mode.md` when the task is expected to run with minimal user interruption.
