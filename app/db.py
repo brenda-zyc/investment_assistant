@@ -72,6 +72,21 @@ def init_db() -> None:
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS external_data_points (
+            indicator_key TEXT NOT NULL,
+            indicator TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            value REAL,
+            source TEXT,
+            source_url TEXT,
+            note TEXT,
+            PRIMARY KEY (indicator_key, trade_date)
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -289,6 +304,71 @@ def fetch_industry_prices(indicator: str | None = None) -> list[dict[str, Any]]:
             SELECT industry, indicator, trade_date, value, source
             FROM industry_prices
             ORDER BY indicator ASC, trade_date ASC
+            """
+        )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def upsert_external_data_points(rows: list[dict[str, Any]]) -> None:
+    """Insert or update external indicator historical points."""
+    if not rows:
+        return
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.executemany(
+        """
+        INSERT INTO external_data_points (
+            indicator_key, indicator, trade_date, value, source, source_url, note
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(indicator_key, trade_date) DO UPDATE SET
+            indicator=excluded.indicator,
+            value=excluded.value,
+            source=excluded.source,
+            source_url=excluded.source_url,
+            note=excluded.note
+        """,
+        [
+            (
+                row["indicator_key"],
+                row["indicator"],
+                row["trade_date"],
+                row.get("value"),
+                row.get("source"),
+                row.get("source_url"),
+                row.get("note"),
+            )
+            for row in rows
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def fetch_external_data_points(indicator_key: str | None = None) -> list[dict[str, Any]]:
+    """Fetch stored external historical points sorted by indicator/date."""
+    conn = get_conn()
+    cur = conn.cursor()
+
+    if indicator_key:
+        cur.execute(
+            """
+            SELECT indicator_key, indicator, trade_date, value, source, source_url, note
+            FROM external_data_points
+            WHERE indicator_key = ?
+            ORDER BY indicator_key ASC, trade_date ASC
+            """,
+            (indicator_key,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT indicator_key, indicator, trade_date, value, source, source_url, note
+            FROM external_data_points
+            ORDER BY indicator_key ASC, trade_date ASC
             """
         )
     rows = [dict(row) for row in cur.fetchall()]

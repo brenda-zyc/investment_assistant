@@ -3,9 +3,16 @@ from __future__ import annotations
 import datetime as dt
 
 from app.core_logic import to_float
-from app.db import fetch_industry_prices, upsert_industry_prices
+from app.db import (
+    fetch_external_data_points,
+    fetch_industry_prices,
+    upsert_external_data_points,
+    upsert_industry_prices,
+)
 from app.services.industry_data_service import (
+    fetch_external_data_rows_with_diagnostics,
     fetch_industry_price_rows_with_diagnostics,
+    get_external_data_specs,
     get_industry_indicator_specs,
 )
 
@@ -152,6 +159,65 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     }
 
 
+def build_external_data_payload(rows: list[dict], diagnostics: dict | None = None) -> list[dict]:
+    """Build latest-value rows for the external-data module with graceful cache diagnostics."""
+    diagnostics = diagnostics or {}
+    indicator_status_map: dict[str, dict] = diagnostics.get("indicator_status", {}) or {}
+    grouped_points: dict[str, list[dict]] = {}
+
+    for row in rows:
+        indicator_key = str(row.get("indicator_key") or "").strip()
+        if not indicator_key:
+            continue
+        trade_date = _parse_iso_date(row.get("trade_date"))
+        value = to_float(row.get("value"))
+        if trade_date is None or value is None:
+            continue
+        normalized = dict(row)
+        normalized["_parsed_trade_date"] = trade_date
+        grouped_points.setdefault(indicator_key, []).append(normalized)
+
+    for key in grouped_points:
+        grouped_points[key].sort(key=lambda item: item["_parsed_trade_date"])
+
+    output_rows: list[dict] = []
+    for spec in get_external_data_specs():
+        indicator_key = spec["indicator_key"]
+        status_item = indicator_status_map.get(indicator_key, {})
+        points = grouped_points.get(indicator_key, [])
+        if not points:
+            output_rows.append(
+                {
+                    "indicator_key": indicator_key,
+                    "indicator": spec["indicator"],
+                    "value": None,
+                    "as_of": None,
+                    "source": spec["source"],
+                    "source_url": spec["source_url"],
+                    "note": spec["note"],
+                    "status": status_item.get("status") or "no_data",
+                    "error": status_item.get("error"),
+                }
+            )
+            continue
+
+        latest = points[-1]
+        output_rows.append(
+            {
+                "indicator_key": indicator_key,
+                "indicator": latest["indicator"],
+                "value": latest["value"],
+                "as_of": latest["trade_date"],
+                "source": latest.get("source") or spec["source"],
+                "source_url": latest.get("source_url") or spec["source_url"],
+                "note": latest.get("note") or spec["note"],
+                "status": status_item.get("status") or "ok",
+                "error": status_item.get("error"),
+            }
+        )
+    return output_rows
+
+
 def suggest_industry_refresh_start(rows: list[dict]) -> str:
     """Suggest bounded incremental refresh start date to keep API latency predictable."""
     parsed_dates = [_parse_iso_date(row.get("trade_date")) for row in rows]
@@ -181,11 +247,52 @@ def industry_history_is_sparse(rows: list[dict], min_points_per_indicator: int =
     return False
 
 
-def get_industry_cycles(refresh: bool = True, diagnostics: bool = True) -> dict:
-    """Return industry cycle dashboard rows with current value and 1Y/5Y percentiles."""
+def external_data_is_stale(rows: list[dict], max_age_days: int = 7) -> bool:
+    """Return True when external indicator cache is missing or older than the freshness window."""
+    parsed_dates = [_parse_iso_date(row.get("trade_date")) for row in rows]
+    valid_dates = [date_value for date_value in parsed_dates if date_value is not None]
+    if not valid_dates:
+        return True
+    latest_date = max(valid_dates)
+    return latest_date < (dt.date.today() - dt.timedelta(days=max_age_days))
+
+
+def _refresh_external_data_cache(
+    existing_external_rows: list[dict],
+    warnings: list[str],
+) -> dict:
+    """Refresh external data cache and return runtime diagnostics for the latest fetch attempt."""
+    external_runtime_diagnostics: dict = {}
+    external_start_date = (dt.date.today() - dt.timedelta(days=400)).strftime("%Y%m%d")
+    try:
+        fetched_external_rows, external_runtime_diagnostics = fetch_external_data_rows_with_diagnostics(
+            start_date=external_start_date
+        )
+        if fetched_external_rows:
+            upsert_external_data_points(fetched_external_rows)
+        elif existing_external_rows:
+            warnings.append("External data refresh returned 0 rows; using existing cache.")
+        else:
+            warnings.append("External data fetch returned 0 rows and no cache is available yet.")
+    except Exception as exc:
+        if existing_external_rows:
+            warnings.append(f"External data refresh failed; using existing cache. Reason: {exc}")
+        else:
+            warnings.append(f"External data fetch failed and no cache is available yet. Reason: {exc}")
+    return external_runtime_diagnostics
+
+
+def get_industry_cycles(
+    refresh: bool = True,
+    diagnostics: bool = True,
+    refresh_external: bool = False,
+) -> dict:
+    """Return industry cycle dashboard rows plus cached external reference rows."""
     warnings: list[str] = []
     runtime_diagnostics: dict = {}
+    external_runtime_diagnostics: dict = {}
     existing_rows = fetch_industry_prices()
+    existing_external_rows = fetch_external_data_points()
 
     if refresh:
         try:
@@ -205,10 +312,23 @@ def get_industry_cycles(refresh: bool = True, diagnostics: bool = True) -> dict:
         except Exception as exc:
             warnings.append(f"Industry data fetch failed; using existing cache. Reason: {exc}")
 
+    if refresh_external:
+        external_runtime_diagnostics = _refresh_external_data_cache(existing_external_rows, warnings)
+    elif existing_external_rows:
+        if external_data_is_stale(existing_external_rows):
+            warnings.append("External data cache is stale; showing last cached snapshot.")
+    else:
+        warnings.append("External data cache is empty; run scripts/update_external_data.py to populate weekly snapshots.")
+
     history_rows = fetch_industry_prices()
+    history_external_rows = fetch_external_data_points()
     payload = build_industry_cycles_payload(
         history_rows,
         diagnostics=runtime_diagnostics if diagnostics else None,
+    )
+    payload["external_rows"] = build_external_data_payload(
+        history_external_rows,
+        diagnostics=external_runtime_diagnostics if diagnostics else None,
     )
     if not diagnostics:
         payload.pop("dns", None)

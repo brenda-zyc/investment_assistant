@@ -57,3 +57,18 @@ def test_financial_report_template_includes_llm_settings_panel_hooks() -> None:
     assert 'id="reportLlmStatus"' in source
     assert 'id="reportLlmAnalysis"' in source
     assert "localStorage" in source
+
+
+def test_dashboard_template_includes_external_data_reference_section() -> None:
+    """Dashboard UI should expose the external-data table and render rows from industry payloads."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert 'id="externalDataTable"' in source
+    assert 'id="refreshExternalDataBtn"' in source
+    assert "External Data References" in source
+    assert "cached weekly snapshots" in source
+    assert "function renderExternalDataReferences(rows)" in source
+    assert "async function refreshExternalDataReferences()" in source
+    assert "data.external_rows || []" in source
+    assert "/industry_cycles?refresh=true&refresh_external=false" in source
+    assert "/industry_cycles?refresh=false&refresh_external=true" in source

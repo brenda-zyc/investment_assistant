@@ -509,6 +509,21 @@
         gap: 12px;
       }
 
+      .external-data-table a {
+        color: var(--primary);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .external-data-table a:hover {
+        text-decoration: underline;
+      }
+
+      .external-data-table .note {
+        color: var(--ink-soft);
+        white-space: normal;
+      }
+
       .report-summary-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -818,6 +833,7 @@
                 </table>
               </div>
             </div>
+
           </aside>
         </div>
       </section>
@@ -887,6 +903,29 @@
                   <th>Source</th>
                   <th>Status</th>
                   <th>Error</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 12px">
+          <h2>External Data References</h2>
+          <p>Show cached weekly snapshots for key commodity, FX, rate, and coal indicators, with source links and fallback notes.</p>
+          <div class="row" style="margin-bottom: 10px">
+            <button id="refreshExternalDataBtn">Refresh External Data</button>
+          </div>
+          <div class="table-wrap">
+            <table id="externalDataTable" class="external-data-table">
+              <thead>
+                <tr>
+                  <th>Indicator</th>
+                  <th>Latest Value</th>
+                  <th>As Of</th>
+                  <th>Source</th>
+                  <th>Link</th>
+                  <th>Status</th>
+                  <th>Note</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1028,7 +1067,9 @@
       const macroTableBody = document.querySelector("#macroTable tbody");
       const stockMetricTableBody = document.querySelector("#stockMetricTable tbody");
       const stockMetricStatusEl = document.getElementById("stockMetricStatus");
+      const externalDataTableBody = document.querySelector("#externalDataTable tbody");
       const loadIndustryBtn = document.getElementById("loadIndustryBtn");
+      const refreshExternalDataBtn = document.getElementById("refreshExternalDataBtn");
       const industryStatusEl = document.getElementById("industryStatus");
       const industryTableBody = document.querySelector("#industryTable tbody");
       const reportCodeInput = document.getElementById("reportCode");
@@ -1334,6 +1375,41 @@
           `;
           reportDetailTableBody.appendChild(tr);
         });
+      }
+
+      function renderExternalDataReferences(rows) {
+        externalDataTableBody.innerHTML = "";
+        rows.forEach((row) => {
+          const linkHtml = row.source_url
+            ? `<a href="${escapeHtmlAttribute(row.source_url)}" target="_blank" rel="noreferrer">Open</a>`
+            : "-";
+          const statusClass =
+            row.status === "ok"
+              ? "ok"
+              : row.status === "proxy" || row.status === "dns_failed"
+                ? "warn"
+                : row.status === "fetch_failed"
+                  ? "bad"
+                  : "";
+          const statusText = row.status || "-";
+          const statusHtml = statusClass ? `<span class="status ${statusClass}">${statusText}</span>` : statusText;
+          const noteText = row.error ? `${row.note || "-"} Error: ${row.error}` : row.note || "-";
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.indicator ?? "-"}</td>
+            <td>${formatNumber(row.value, 4)}</td>
+            <td>${row.as_of ?? "-"}</td>
+            <td>${row.source ?? "-"}</td>
+            <td>${linkHtml}</td>
+            <td>${statusHtml}</td>
+            <td class="note">${noteText}</td>
+          `;
+          externalDataTableBody.appendChild(tr);
+        });
+      }
+
+      function buildIndustryWarningText(data) {
+        return (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
       }
 
       function reportLevelBadge(level, verdict) {
@@ -2143,24 +2219,56 @@
 
       async function loadIndustryCycles() {
         loadIndustryBtn.disabled = true;
+        refreshExternalDataBtn.disabled = true;
         industryStatusEl.textContent = "Loading industry cycles...";
         industryTableBody.innerHTML = "";
+        externalDataTableBody.innerHTML = "";
 
         try {
-          const res = await fetch(`${apiBase}/industry_cycles?refresh=true`);
+          const res = await fetch(`${apiBase}/industry_cycles?refresh=true&refresh_external=false`);
           const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
           const rows = flattenIndustryGroups(data);
           renderIndustryRows(rows);
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          renderExternalDataReferences(data.external_rows || []);
+          const warningText = buildIndustryWarningText(data);
           industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}.${warningText}`;
         } catch (err) {
+          externalDataTableBody.innerHTML = "";
           if (isBackendUnreachable(err)) {
             industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
             industryStatusEl.textContent = `Error: ${err.message}`;
           }
         } finally {
+          loadIndustryBtn.disabled = false;
+          refreshExternalDataBtn.disabled = false;
+        }
+      }
+
+      async function refreshExternalDataReferences() {
+        refreshExternalDataBtn.disabled = true;
+        loadIndustryBtn.disabled = true;
+        industryStatusEl.textContent = "Refreshing external data...";
+        externalDataTableBody.innerHTML = "";
+
+        try {
+          const res = await fetch(`${apiBase}/industry_cycles?refresh=false&refresh_external=true`);
+          const data = await parseJsonResponse(res, "Industry external data endpoint");
+          if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
+          renderExternalDataReferences(data.external_rows || []);
+          const refreshedCount = (data.external_rows || []).filter((row) => row.value !== null && row.value !== undefined).length;
+          const warningText = buildIndustryWarningText(data);
+          industryStatusEl.textContent = `External data refreshed. Cached values: ${refreshedCount}.${warningText}`;
+        } catch (err) {
+          externalDataTableBody.innerHTML = "";
+          if (isBackendUnreachable(err)) {
+            industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            industryStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          refreshExternalDataBtn.disabled = false;
           loadIndustryBtn.disabled = false;
         }
       }
@@ -2193,6 +2301,7 @@
         renderMacroRows(rows);
       });
       loadIndustryBtn.addEventListener("click", loadIndustryCycles);
+      refreshExternalDataBtn.addEventListener("click", refreshExternalDataReferences);
       loadReportBtn.addEventListener("click", loadFinancialReport);
       autoReadReportBtn.addEventListener("click", autoReadAnnualReport);
       saveLlmSessionBtn.addEventListener("click", saveLlmSessionConfig);
