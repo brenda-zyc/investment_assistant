@@ -525,7 +525,11 @@ def compute_financial_report_autoread_assessment(
     if operating_cash_flow_latest is not None:
         sustainability_signal_count += 1
         sustainability_evidence.append(f"最新经营现金流 = {_format_amount_readable(operating_cash_flow_latest)}。")
-        if operating_cash_flow_latest > 0:
+        if cash_conversion is not None and cash_conversion >= 1.0:
+            sustainability_score += 5
+        elif cash_conversion is not None and cash_conversion < 0.5:
+            sustainability_score -= 20
+        elif operating_cash_flow_latest > 0:
             sustainability_score += 5
         else:
             sustainability_score -= 10
@@ -537,7 +541,7 @@ def compute_financial_report_autoread_assessment(
         if recurring_profit_ratio >= 0.8:
             sustainability_score += 5
         elif recurring_profit_ratio < 0.6:
-            sustainability_score -= 10
+            sustainability_score -= 20
 
     if sustainability_signal_count == 0:
         answers.append(

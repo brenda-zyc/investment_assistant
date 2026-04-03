@@ -365,6 +365,25 @@ def test_compute_financial_report_autoread_assessment_skips_yoy_when_report_peri
     assert not any(item.startswith("最新净利润同比") for item in answer_map["profit_sustainability"]["evidence"])
 
 
+def test_compute_financial_report_autoread_assessment_penalizes_low_quality_profit_signals() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={},
+        historical_context={
+            "revenue": [("2021-12-31", 100.0), ("2022-12-31", 110.0), ("2023-12-31", 121.0), ("2024-12-31", 133.1), ("2025-12-31", 146.41)],
+            "net_profit": [("2021-12-31", 10.0), ("2022-12-31", 12.0), ("2023-12-31", 14.4), ("2024-12-31", 17.28), ("2025-12-31", 20.736)],
+            "roe": [("2025-12-31", 22.0)],
+            "deducted_net_profit": [("2025-12-31", 4.0)],
+            "operating_cash_flow": [("2025-12-31", 6.0)],
+            "capex_cash_outflow": [("2025-12-31", 3.0)],
+        },
+    )
+
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert answer_map["profit_authenticity"]["level"] == "risk"
+    assert answer_map["profit_sustainability"]["level"] == "warn"
+    assert answer_map["profit_sustainability"]["verdict"] == "一般"
+
+
 def test_compute_financial_report_autoread_assessment_insufficient_case() -> None:
     payload = compute_financial_report_autoread_assessment(latest_report_metrics={}, historical_context={})
 
