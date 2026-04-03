@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 
@@ -253,6 +254,44 @@ def _safe_ratio(numerator: float | None, denominator: float | None) -> float | N
     return numerator / denominator
 
 
+def _month_day(date_text: Any) -> str | None:
+    """Return MM-DD for a YYYY-MM-DD style date string when available."""
+    text = str(date_text or "").strip()
+    if len(text) < 10:
+        return None
+    return text[5:10]
+
+
+def _metric_evidence(metrics: dict[str, Any], metric_name: str) -> dict[str, Any] | None:
+    """Return the first evidence payload for the requested metric."""
+    for item in metrics.get("evidence", []) or []:
+        if item.get("metric") == metric_name:
+            return item
+    return None
+
+
+def _is_ambiguous_amount_evidence(evidence: dict[str, Any] | None) -> bool:
+    """Return whether an extracted amount likely came from an ambiguous multi-column table row."""
+    if not evidence:
+        return False
+    raw_number = str(evidence.get("raw_number") or "")
+    snippet = str(evidence.get("snippet") or "")
+    if any(unit in raw_number for unit in ("亿", "万", "%")):
+        return False
+    numeric_tokens = re.findall(r"\d[\d,]*(?:\.\d+)?", snippet)
+    return len(numeric_tokens) >= 4
+
+
+def _is_report_metric_verified(metric_name: str, metrics: dict[str, Any]) -> bool:
+    """Return whether a report-extracted metric looks reliable enough to override historical data."""
+    evidence = _metric_evidence(metrics, metric_name)
+    if evidence is None:
+        return True
+    if metric_name == "deducted_net_profit" and _is_ambiguous_amount_evidence(evidence):
+        return False
+    return True
+
+
 def _answer_item(
     *,
     question_id: str,
@@ -290,21 +329,32 @@ def compute_financial_report_autoread_assessment(
     operating_cash_flow_points = historical_context.get("operating_cash_flow", [])
     capex_points = historical_context.get("capex_cash_outflow", [])
 
-    _, revenue_latest = _latest_value_from_points(revenue_points)
+    revenue_latest_date, revenue_latest = _latest_value_from_points(revenue_points)
     _, revenue_previous = _previous_value_from_points(revenue_points)
-    _, net_profit_latest = _latest_value_from_points(net_profit_points)
+    net_profit_latest_date, net_profit_latest = _latest_value_from_points(net_profit_points)
     _, net_profit_previous = _previous_value_from_points(net_profit_points)
     _, roe_latest = _latest_value_from_points(roe_points)
     _, deducted_latest = _latest_value_from_points(deducted_points)
     _, operating_cash_flow_latest = _latest_value_from_points(operating_cash_flow_points)
     _, capex_latest = _latest_value_from_points(capex_points)
 
+    report_date = latest_report_metrics.get("report_date")
     report_revenue = to_float(latest_report_metrics.get("revenue"))
     report_net_profit = to_float(latest_report_metrics.get("net_profit"))
     report_roe = to_float(latest_report_metrics.get("roe"))
     report_deducted_net_profit = to_float(latest_report_metrics.get("deducted_net_profit"))
     report_operating_cash_flow = to_float(latest_report_metrics.get("operating_cash_flow"))
     report_capex = to_float(latest_report_metrics.get("capex_cash_outflow"))
+
+    verification_notes: list[str] = []
+    if report_deducted_net_profit is not None and not _is_report_metric_verified("deducted_net_profit", latest_report_metrics):
+        verification_notes.append("扣非净利润抽取未验证，已回退到历史财务序列。")
+        report_deducted_net_profit = None
+
+    if report_revenue is not None and _month_day(report_date) != _month_day(revenue_latest_date):
+        revenue_previous = None
+    if report_net_profit is not None and _month_day(report_date) != _month_day(net_profit_latest_date):
+        net_profit_previous = None
 
     revenue_latest = report_revenue if report_revenue is not None else revenue_latest
     net_profit_latest = report_net_profit if report_net_profit is not None else net_profit_latest
@@ -359,6 +409,7 @@ def compute_financial_report_autoread_assessment(
 
         if recurring_profit_ratio is not None:
             authenticity_signal_count += 1
+            authenticity_evidence.extend(verification_notes)
             authenticity_evidence.append(f"扣非净利润/净利润 = {recurring_profit_ratio:.2f}x。")
             # Financial logic: a low deducted-profit ratio suggests profit may rely on non-recurring items.
             if recurring_profit_ratio >= 0.9:
@@ -481,6 +532,7 @@ def compute_financial_report_autoread_assessment(
 
     if recurring_profit_ratio is not None:
         sustainability_signal_count += 1
+        sustainability_evidence.extend(verification_notes)
         sustainability_evidence.append(f"最新扣非净利润/净利润 = {recurring_profit_ratio:.2f}x。")
         if recurring_profit_ratio >= 0.8:
             sustainability_score += 5
