@@ -898,6 +898,7 @@
                   <th>Industry</th>
                   <th>Indicator</th>
                   <th>Value</th>
+                  <th>As Of</th>
                   <th>1Y Percentile</th>
                   <th>5Y Percentile</th>
                   <th>Source</th>
@@ -915,6 +916,7 @@
           <div class="row" style="margin-bottom: 10px">
             <button id="refreshExternalDataBtn">Refresh External Data</button>
           </div>
+          <div class="muted" id="externalDataStatus"></div>
           <div class="table-wrap">
             <table id="externalDataTable" class="external-data-table">
               <thead>
@@ -1068,6 +1070,7 @@
       const stockMetricTableBody = document.querySelector("#stockMetricTable tbody");
       const stockMetricStatusEl = document.getElementById("stockMetricStatus");
       const externalDataTableBody = document.querySelector("#externalDataTable tbody");
+      const externalDataStatusEl = document.getElementById("externalDataStatus");
       const loadIndustryBtn = document.getElementById("loadIndustryBtn");
       const refreshExternalDataBtn = document.getElementById("refreshExternalDataBtn");
       const industryStatusEl = document.getElementById("industryStatus");
@@ -1145,7 +1148,7 @@
           macroLoadedOnce = true;
         }
         if (isIndustry && !industryLoadedOnce) {
-          loadIndustryCycles();
+          loadCachedIndustryCycles();
           industryLoadedOnce = true;
         }
         if (isReport && !reportLoadedOnce) {
@@ -1386,7 +1389,7 @@
           const statusClass =
             row.status === "ok"
               ? "ok"
-              : row.status === "proxy" || row.status === "dns_failed"
+              : row.status === "proxy" || row.status === "dns_failed" || row.status === "cached"
                 ? "warn"
                 : row.status === "fetch_failed"
                   ? "bad"
@@ -1410,6 +1413,12 @@
 
       function buildIndustryWarningText(data) {
         return (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+      }
+
+      function latestAsOfFromRows(rows) {
+        const asOfValues = (rows || []).map((row) => row?.as_of).filter(Boolean);
+        if (!asOfValues.length) return "-";
+        return asOfValues.sort().at(-1);
       }
 
       function reportLevelBadge(level, verdict) {
@@ -2034,6 +2043,7 @@
             <td>${row.industry ?? "-"}</td>
             <td>${row.indicator ?? "-"}</td>
             <td>${formatNumber(row.value)}</td>
+            <td>${row.as_of ?? "-"}</td>
             <td>${oneYear}</td>
             <td>${fiveYear}</td>
             <td>${source}</td>
@@ -2219,10 +2229,8 @@
 
       async function loadIndustryCycles() {
         loadIndustryBtn.disabled = true;
-        refreshExternalDataBtn.disabled = true;
         industryStatusEl.textContent = "Loading industry cycles...";
         industryTableBody.innerHTML = "";
-        externalDataTableBody.innerHTML = "";
 
         try {
           const res = await fetch(`${apiBase}/industry_cycles?refresh=true&refresh_external=false`);
@@ -2230,15 +2238,47 @@
           if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
           const rows = flattenIndustryGroups(data);
           renderIndustryRows(rows);
-          renderExternalDataReferences(data.external_rows || []);
           const warningText = buildIndustryWarningText(data);
           industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}.${warningText}`;
         } catch (err) {
-          externalDataTableBody.innerHTML = "";
           if (isBackendUnreachable(err)) {
             industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
             industryStatusEl.textContent = `Error: ${err.message}`;
+          }
+        } finally {
+          loadIndustryBtn.disabled = false;
+        }
+      }
+
+      async function loadCachedIndustryCycles() {
+        loadIndustryBtn.disabled = true;
+        refreshExternalDataBtn.disabled = true;
+        industryStatusEl.textContent = "Loading cached industry snapshot...";
+        externalDataStatusEl.textContent = "Loading cached external snapshot...";
+
+        try {
+          const res = await fetch(`${apiBase}/industry_cycles?refresh=false&refresh_external=false`);
+          const data = await parseJsonResponse(res, "Industry cache endpoint");
+          if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
+          const rows = flattenIndustryGroups(data);
+          const externalRows = data.external_rows || [];
+          renderIndustryRows(rows);
+          renderExternalDataReferences(externalRows);
+          const warningText = buildIndustryWarningText(data);
+          const industryAsOf = data.as_of || "-";
+          const externalAsOf = latestAsOfFromRows(externalRows);
+          industryStatusEl.textContent = `Showing cached snapshot. Industry as of: ${industryAsOf}.${warningText}`;
+          externalDataStatusEl.textContent = `Showing cached snapshot. External data as of: ${externalAsOf}.`;
+        } catch (err) {
+          industryTableBody.innerHTML = "";
+          externalDataTableBody.innerHTML = "";
+          if (isBackendUnreachable(err)) {
+            industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+            externalDataStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+          } else {
+            industryStatusEl.textContent = `Error: ${err.message}`;
+            externalDataStatusEl.textContent = `Error: ${err.message}`;
           }
         } finally {
           loadIndustryBtn.disabled = false;
@@ -2248,8 +2288,7 @@
 
       async function refreshExternalDataReferences() {
         refreshExternalDataBtn.disabled = true;
-        loadIndustryBtn.disabled = true;
-        industryStatusEl.textContent = "Refreshing external data...";
+        externalDataStatusEl.textContent = "Refreshing external data...";
         externalDataTableBody.innerHTML = "";
 
         try {
@@ -2259,17 +2298,16 @@
           renderExternalDataReferences(data.external_rows || []);
           const refreshedCount = (data.external_rows || []).filter((row) => row.value !== null && row.value !== undefined).length;
           const warningText = buildIndustryWarningText(data);
-          industryStatusEl.textContent = `External data refreshed. Cached values: ${refreshedCount}.${warningText}`;
+          externalDataStatusEl.textContent = `External data refreshed. Cached values: ${refreshedCount}.${warningText}`;
         } catch (err) {
           externalDataTableBody.innerHTML = "";
           if (isBackendUnreachable(err)) {
-            industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
+            externalDataStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
-            industryStatusEl.textContent = `Error: ${err.message}`;
+            externalDataStatusEl.textContent = `Error: ${err.message}`;
           }
         } finally {
           refreshExternalDataBtn.disabled = false;
-          loadIndustryBtn.disabled = false;
         }
       }
 

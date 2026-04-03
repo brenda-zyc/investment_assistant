@@ -126,3 +126,88 @@ def test_get_industry_cycles_can_refresh_external_without_refreshing_industry(mo
     assert external_fetch_called["value"] is True
     usd_row = next(row for row in payload["external_rows"] if row["indicator_key"] == "usd_cnh")
     assert usd_row["status"] == "ok"
+
+
+def test_build_external_data_payload_keeps_cached_source_and_date_when_refresh_fails() -> None:
+    """Displayed source and date should continue to describe the cached value during refresh fallback."""
+    rows = [
+        {
+            "indicator_key": "usd_cnh",
+            "indicator": "美元汇率（美元兑离岸人民币）",
+            "trade_date": "2026-04-02",
+            "value": 6.8952,
+            "source": "东方财富",
+            "source_url": "https://example.com/usdcnh",
+            "note": "直接抓取美元兑离岸人民币历史行情最新值。",
+        }
+    ]
+    diagnostics = {
+        "indicator_status": {
+            "usd_cnh": {
+                "status": "fetch_failed",
+                "error": "connection aborted",
+            }
+        }
+    }
+
+    payload = industry_usecase.build_external_data_payload(rows, diagnostics=diagnostics)
+
+    usd_row = next(row for row in payload if row["indicator_key"] == "usd_cnh")
+    assert usd_row["value"] == 6.8952
+    assert usd_row["as_of"] == "2026-04-02"
+    assert usd_row["source"] == "东方财富"
+    assert usd_row["status"] == "cached"
+    assert "Showing cached snapshot" in usd_row["note"]
+    assert usd_row["error"] == "connection aborted"
+
+
+def test_build_external_data_payload_uses_cached_status_when_refresh_returns_no_new_rows() -> None:
+    """Cached rows should not be relabeled as no_data when a refresh returns zero new points."""
+    rows = [
+        {
+            "indicator_key": "comex_gold",
+            "indicator": "金价（COMEX黄金）",
+            "trade_date": "2026-04-02",
+            "value": 4669.4,
+            "source": "东方财富",
+            "source_url": "https://example.com/gold",
+            "note": "直接抓取 COMEX 黄金历史行情最新值。",
+        }
+    ]
+    diagnostics = {
+        "indicator_status": {
+            "comex_gold": {
+                "status": "no_data",
+                "error": None,
+            }
+        }
+    }
+
+    payload = industry_usecase.build_external_data_payload(rows, diagnostics=diagnostics)
+
+    gold_row = next(row for row in payload if row["indicator_key"] == "comex_gold")
+    assert gold_row["value"] == 4669.4
+    assert gold_row["as_of"] == "2026-04-02"
+    assert gold_row["source"] == "东方财富"
+    assert gold_row["status"] == "cached"
+    assert "latest refresh returned no new data" in gold_row["note"]
+
+
+def test_build_external_data_payload_keeps_no_data_when_cache_is_empty() -> None:
+    """Indicators with no cached row should continue to surface no_data."""
+    diagnostics = {
+        "indicator_status": {
+            "gold_td": {
+                "status": "no_data",
+                "error": None,
+            }
+        }
+    }
+
+    payload = industry_usecase.build_external_data_payload([], diagnostics=diagnostics)
+
+    gold_td_row = next(row for row in payload if row["indicator_key"] == "gold_td")
+    assert gold_td_row["value"] is None
+    assert gold_td_row["as_of"] is None
+    assert gold_td_row["source"] == "东方财富"
+    assert gold_td_row["status"] == "no_data"

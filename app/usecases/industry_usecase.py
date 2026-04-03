@@ -159,6 +159,33 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     }
 
 
+def _external_display_status(refresh_status: str | None, has_cache: bool) -> str:
+    """Map refresh diagnostics into the status shown beside the currently displayed row."""
+    if not has_cache:
+        return refresh_status or "no_data"
+    if refresh_status in {"ok", "proxy"}:
+        return refresh_status
+    return "cached"
+
+
+def _merge_external_display_note(
+    base_note: str | None,
+    refresh_status: str | None,
+    has_cache: bool,
+) -> str:
+    """Append cache fallback context without changing the source-specific note text."""
+    note = (base_note or "").strip() or "-"
+    if not has_cache:
+        return note
+    if refresh_status == "fetch_failed":
+        return f"{note} Showing cached snapshot; latest refresh failed."
+    if refresh_status == "dns_failed":
+        return f"{note} Showing cached snapshot; latest refresh hit DNS issues."
+    if refresh_status == "no_data":
+        return f"{note} Showing cached snapshot; latest refresh returned no new data."
+    return note
+
+
 def build_external_data_payload(rows: list[dict], diagnostics: dict | None = None) -> list[dict]:
     """Build latest-value rows for the external-data module with graceful cache diagnostics."""
     diagnostics = diagnostics or {}
@@ -184,6 +211,8 @@ def build_external_data_payload(rows: list[dict], diagnostics: dict | None = Non
     for spec in get_external_data_specs():
         indicator_key = spec["indicator_key"]
         status_item = indicator_status_map.get(indicator_key, {})
+        refresh_status = status_item.get("status")
+        refresh_error = status_item.get("error")
         points = grouped_points.get(indicator_key, [])
         if not points:
             output_rows.append(
@@ -194,9 +223,9 @@ def build_external_data_payload(rows: list[dict], diagnostics: dict | None = Non
                     "as_of": None,
                     "source": spec["source"],
                     "source_url": spec["source_url"],
-                    "note": spec["note"],
-                    "status": status_item.get("status") or "no_data",
-                    "error": status_item.get("error"),
+                    "note": _merge_external_display_note(spec["note"], refresh_status, has_cache=False),
+                    "status": _external_display_status(refresh_status, has_cache=False),
+                    "error": refresh_error,
                 }
             )
             continue
@@ -210,9 +239,13 @@ def build_external_data_payload(rows: list[dict], diagnostics: dict | None = Non
                 "as_of": latest["trade_date"],
                 "source": latest.get("source") or spec["source"],
                 "source_url": latest.get("source_url") or spec["source_url"],
-                "note": latest.get("note") or spec["note"],
-                "status": status_item.get("status") or "ok",
-                "error": status_item.get("error"),
+                "note": _merge_external_display_note(
+                    latest.get("note") or spec["note"],
+                    refresh_status,
+                    has_cache=True,
+                ),
+                "status": _external_display_status(refresh_status, has_cache=True),
+                "error": refresh_error,
             }
         )
     return output_rows
