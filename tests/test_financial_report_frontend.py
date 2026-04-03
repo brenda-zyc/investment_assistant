@@ -58,7 +58,6 @@ def test_financial_report_template_includes_llm_settings_panel_hooks() -> None:
     assert 'id="reportLlmAnalysis"' in source
     assert "localStorage" in source
 
-
 def test_financial_report_template_includes_report_qa_panel() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
@@ -165,3 +164,76 @@ def test_auto_read_resets_report_qa_before_fetch() -> None:
     fetch_call = "const res = await fetch("
     assert reset_call in body
     assert body.index(reset_call) < body.index(fetch_call)
+
+
+def test_dashboard_template_includes_external_data_reference_section() -> None:
+    """Dashboard UI should expose the external-data table and render rows from industry payloads."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert 'id="externalDataTable"' in source
+    assert 'id="externalDataStatus"' in source
+    assert 'id="refreshExternalDataBtn"' in source
+    assert "External Data References" in source
+    assert "cached weekly snapshots" in source
+    assert "function renderExternalDataReferences(rows)" in source
+    assert "async function loadCachedIndustryCycles()" in source
+    assert "async function refreshExternalDataReferences()" in source
+    assert "data.external_rows || []" in source
+    assert "/industry_cycles?refresh=true&refresh_external=false" in source
+    assert "/industry_cycles?refresh=false&refresh_external=false" in source
+    assert "/industry_cycles?refresh=false&refresh_external=true" in source
+
+
+def test_load_industry_cycles_does_not_touch_external_reference_table() -> None:
+    """Industry refresh should not clear or rerender the external reference table."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function loadIndustryCycles()")
+
+    assert 'loadIndustryBtn.disabled = true;' in body
+    assert 'refreshExternalDataBtn.disabled = true;' not in body
+    assert 'refreshExternalDataBtn.disabled = false;' not in body
+    assert "renderIndustryRows(rows);" in body
+    assert "renderExternalDataReferences(data.external_rows || []);" not in body
+    assert "externalDataTableBody.innerHTML = \"\";" not in body
+
+
+def test_load_cached_industry_cycles_reads_cache_and_renders_both_tables() -> None:
+    """Initial industry-tab load should read cached data and render both tables."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function loadCachedIndustryCycles()")
+
+    assert "/industry_cycles?refresh=false&refresh_external=false" in body
+    assert "renderIndustryRows(rows);" in body
+    assert "renderExternalDataReferences(externalRows);" in body
+    assert "Showing cached snapshot." in body
+
+
+def test_refresh_external_data_uses_dedicated_status_element() -> None:
+    """External refresh should update only the external-data status text."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function refreshExternalDataReferences()")
+
+    assert 'refreshExternalDataBtn.disabled = true;' in body
+    assert 'loadIndustryBtn.disabled = true;' not in body
+    assert 'loadIndustryBtn.disabled = false;' not in body
+    assert "externalDataStatusEl.textContent = \"Refreshing external data...\";" in body
+    assert "industryStatusEl.textContent = \"Refreshing external data...\";" not in body
+
+
+def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
+    """Cached fallback rows should render as warning badges instead of hard failures."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "function renderExternalDataReferences(rows)")
+
+    assert 'row.status === "cached"' in body
+    assert 'row.status === "proxy" || row.status === "dns_failed" || row.status === "cached"' in body
+
+
+def test_industry_table_includes_as_of_column() -> None:
+    """Industry table should expose per-row extraction dates."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "<th>As Of</th>" in source
+
+    body = _function_body(source, "function renderIndustryRows(rows)")
+    assert "${row.as_of ?? \"-\"}" in body

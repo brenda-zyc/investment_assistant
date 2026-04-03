@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import datetime as dt
+from io import StringIO
 import logging
+import re
 import socket
 import time
+import warnings
 from typing import Any
 
 import akshare as ak
 import pandas as pd
+import requests
 
 from app.services.common import _call_with_resilience, _find_col, to_date_str, to_float
 
 logger = logging.getLogger(__name__)
 
 _HOST_RESOLVE_OK_CACHE: dict[str, float] = {}
+_TREASURY_CURVE_TABLE_CACHE: dict[str, tuple[float, list[pd.DataFrame]]] = {}
 
 # API assumption: these hosts are the critical availability gates for each upstream family.
 _SOURCE_HOSTS: dict[str, list[str]] = {
@@ -23,6 +28,10 @@ _SOURCE_HOSTS: dict[str, list[str]] = {
     "spot_hog_lean_price_soozhu": ["www.soozhu.com"],
     "spot_corn_price_soozhu": ["www.soozhu.com"],
     "futures_spot_price_daily": ["www.100ppi.com"],
+    "forex_hist_em": ["push2his.eastmoney.com"],
+    "index_global_hist_em": ["push2his.eastmoney.com"],
+    "us_treasury_curve": ["home.treasury.gov"],
+    "zhaomei_water_coal": ["m.zhaomei.com"],
 }
 
 INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
@@ -115,10 +124,127 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
     },
 ]
 
+EXTERNAL_DATA_SPECS: list[dict[str, str]] = [
+    {
+        "indicator_key": "comex_silver",
+        "indicator": "银价（COMEX白银）",
+        "fetch_kind": "global_future",
+        "symbol": "SI00Y",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/globalfuture/SI00Y.html?jump_to_web=true",
+        "note": "直接抓取 COMEX 白银历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "comex_gold",
+        "indicator": "金价（COMEX黄金）",
+        "fetch_kind": "global_future",
+        "symbol": "GC00Y",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/globalfuture/GC00Y.html?jump_to_web=true",
+        "note": "直接抓取 COMEX 黄金历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "gold_td",
+        "indicator": "黄金T+D",
+        "fetch_kind": "global_future",
+        "symbol": "AUTD",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/globalfuture/AUTD.html?jump_to_web=true",
+        "note": "直接抓取黄金 T+D 历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "nymex_oil",
+        "indicator": "油价（NYMEX原油）",
+        "fetch_kind": "global_future",
+        "symbol": "CL00Y",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/globalfuture/CL00Y.html?jump_to_web=true",
+        "note": "直接抓取 NYMEX 原油历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "eur_cnh",
+        "indicator": "欧元汇率（欧元兑离岸人民币）",
+        "fetch_kind": "forex_hist",
+        "symbol": "EURCNH",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/forex/EURCNH.html?jump_to_web=true",
+        "note": "为保持与美元项一致，统一使用东方财富外汇历史数据抓取。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "usd_cnh",
+        "indicator": "美元汇率（美元兑离岸人民币）",
+        "fetch_kind": "forex_hist",
+        "symbol": "USDCNH",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/forex/USDCNH.html?jump_to_web=true",
+        "note": "直接抓取美元兑离岸人民币历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "dollar_index",
+        "indicator": "美元指数",
+        "fetch_kind": "global_index",
+        "symbol": "美元指数",
+        "source": "东方财富",
+        "source_url": "https://quote.eastmoney.com/gb/zsUDI.html?jump_to_web=true",
+        "note": "直接抓取全球指数中的美元指数历史行情最新值。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "us_treasury_6m",
+        "indicator": "美债半年",
+        "fetch_kind": "us_treasury_curve",
+        "column": "6 Mo",
+        "source": "U.S. Treasury",
+        "source_url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve",
+        "note": "使用美国财政部官方日度收益率曲线，替代英为财情页面抓取。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "us_treasury_10y",
+        "indicator": "美债10年",
+        "fetch_kind": "us_treasury_curve",
+        "column": "10 Yr",
+        "source": "U.S. Treasury",
+        "source_url": "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve",
+        "note": "使用美国财政部官方日度收益率曲线，替代英为财情页面抓取。",
+        "status_on_success": "ok",
+    },
+    {
+        "indicator_key": "thermal_coal_5500k",
+        "indicator": "煤炭5500K：动力煤",
+        "fetch_kind": "basis_proxy",
+        "basis_var": "ZC",
+        "source": "100ppi（代理）",
+        "source_url": "https://www.100ppi.com/sf/",
+        "note": "原中国煤炭市场网页面不稳定，暂用 100ppi 动力煤现货代理值。",
+        "status_on_success": "proxy",
+    },
+    {
+        "indicator_key": "cement_coal_5500k",
+        "indicator": "煤炭5500K：水泥煤",
+        "fetch_kind": "zhaomei_water_coal",
+        "source": "找煤网",
+        "source_url": "https://m.zhaomei.com/",
+        "note": "按找煤网首页公开水泥煤价格抓取。",
+        "status_on_success": "ok",
+    },
+]
+
 
 def get_industry_indicator_specs() -> list[dict[str, str]]:
     """Return industry indicator catalog used by industry cycle API."""
     return [dict(item) for item in INDUSTRY_INDICATOR_SPECS]
+
+
+def get_external_data_specs() -> list[dict[str, str]]:
+    """Return external indicator catalog used by the industry-side reference module."""
+    return [dict(item) for item in EXTERNAL_DATA_SPECS]
 
 
 def _dedupe_points(points: list[tuple[str, float]]) -> list[tuple[str, float]]:
@@ -143,6 +269,19 @@ def _normalize_history_frame(df: pd.DataFrame, date_col: str, value_col: str) ->
             continue
         points.append((date_text, value))
     return _dedupe_points(points)
+
+
+def _filter_points_to_window(
+    points: list[tuple[str, float]],
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[tuple[str, float]]:
+    """Filter normalized points into a requested ISO-date window."""
+    start_text = to_date_str(start_date)
+    end_text = to_date_str(end_date)
+    if not start_text or not end_text:
+        return points
+    return [point for point in points if start_text <= point[0] <= end_text]
 
 
 def _is_host_resolvable(host: str) -> bool:
@@ -194,6 +333,24 @@ def _expected_hosts_for_spec(spec: dict[str, str]) -> list[str]:
     if str(spec.get("basis_var") or "").strip():
         hosts.update(_resolve_source_hosts("futures_spot_price_daily"))
     return sorted(hosts)
+
+
+def _expected_hosts_for_external_spec(spec: dict[str, str]) -> list[str]:
+    """Infer candidate hosts for an external indicator based on its configured fetch strategy."""
+    fetch_kind = str(spec.get("fetch_kind") or "").strip()
+    if fetch_kind == "global_future":
+        return _resolve_source_hosts("futures_global_hist_em")
+    if fetch_kind == "forex_hist":
+        return _resolve_source_hosts("forex_hist_em")
+    if fetch_kind == "global_index":
+        return _resolve_source_hosts("index_global_hist_em")
+    if fetch_kind == "us_treasury_curve":
+        return _resolve_source_hosts("us_treasury_curve")
+    if fetch_kind == "zhaomei_water_coal":
+        return _resolve_source_hosts("zhaomei_water_coal")
+    if fetch_kind == "basis_proxy":
+        return _resolve_source_hosts("futures_spot_price_daily")
+    return []
 
 
 def _fetch_futures_basis_series(var_symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
@@ -288,6 +445,87 @@ def _fetch_corn_spot_series() -> list[tuple[str, float]]:
     return _normalize_history_frame(df, "日期", "价格")
 
 
+def _fetch_forex_hist_series(symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
+    """Fetch one forex history series from Eastmoney and return latest-close points."""
+    df = _call_with_resilience(ak.forex_hist_em, symbol=symbol)
+    if df is None or df.empty:
+        return []
+    points = _normalize_history_frame(df, "日期", "最新价")
+    return _filter_points_to_window(points, start_date=start_date, end_date=end_date)
+
+
+def _fetch_global_index_hist_series(symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
+    """Fetch one global-index history series from Eastmoney."""
+    df = _call_with_resilience(ak.index_global_hist_em, symbol=symbol)
+    if df is None or df.empty:
+        return []
+    points = _normalize_history_frame(df, "日期", "最新价")
+    return _filter_points_to_window(points, start_date=start_date, end_date=end_date)
+
+
+def _fetch_us_treasury_curve_series(column_name: str) -> list[tuple[str, float]]:
+    """Fetch official U.S. Treasury yield-curve column history from the public table page."""
+    current_month = dt.date.today().strftime("%Y%m")
+    tables = _load_us_treasury_tables(current_month)
+    for df in tables:
+        cols = [str(col).strip() for col in df.columns]
+        date_col = next((col for col in cols if col.lower() == "date"), None)
+        if not date_col or column_name not in cols:
+            continue
+        return _normalize_history_frame(df, date_col, column_name)
+    return []
+
+
+def _load_us_treasury_tables(current_month: str) -> list[pd.DataFrame]:
+    """Load and cache the current Treasury month table so 6M/10Y share one network fetch."""
+    cache_ttl_seconds = 300
+    cache_item = _TREASURY_CURVE_TABLE_CACHE.get(current_month)
+    now = time.time()
+    if cache_item and (now - cache_item[0]) <= cache_ttl_seconds:
+        return cache_item[1]
+
+    url = (
+        "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
+        f"TextView?field_tdr_date_value_month={current_month}&type=daily_treasury_yield_curve"
+    )
+    try:
+        tables = _call_with_resilience(lambda: pd.read_html(url))
+    except Exception:
+        tables = []
+    if not tables:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            response = _call_with_resilience(lambda: requests.get(url, timeout=20, verify=False))
+        response.raise_for_status()
+        tables = pd.read_html(StringIO(response.text))
+    _TREASURY_CURVE_TABLE_CACHE[current_month] = (now, tables)
+    return tables
+
+
+def _fetch_zhaomei_water_coal_series() -> list[tuple[str, float]]:
+    """Fetch the public 水泥煤 price shown on 找煤网 mobile homepage."""
+
+    def _load_html() -> str:
+        response = requests.get("https://m.zhaomei.com/", timeout=10)
+        response.raise_for_status()
+        return response.text
+
+    html = _call_with_resilience(_load_html)
+    compact = re.sub(r"\s+", " ", html)
+    section_match = re.search(
+        r"水泥煤</span>现货参考价.*?<div class=\"floor_subtitle\">(\d{4}-\d{2}-\d{2})</div>.*?"
+        r"水泥煤5500K\s*1\.0S</span></div>\s*<div class=\"bd\"><span>(\d+(?:\.\d+)?)</span>元/吨</div>",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if section_match:
+        normalized_date = to_date_str(section_match.group(1))
+        value = to_float(section_match.group(2))
+        if normalized_date and value is not None:
+            return [(normalized_date, value)]
+    return []
+
+
 def _today_yyyymmdd() -> str:
     """Return today's date in YYYYMMDD format."""
     return dt.date.today().strftime("%Y%m%d")
@@ -348,6 +586,41 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
                 return points, f"futures_spot_price_daily:{basis_var}"
         except Exception as exc:
             logger.warning("industry_cycles basis source failed indicator=%s err=%s", indicator_key, exc)
+    return [], ""
+
+
+def _fetch_single_external_series(spec: dict[str, str], start_date: str, end_date: str) -> tuple[list[tuple[str, float]], str]:
+    """Fetch one external indicator series using the configured strategy."""
+    fetch_kind = str(spec.get("fetch_kind") or "").strip()
+    if fetch_kind == "global_future":
+        symbol = str(spec.get("symbol") or "").strip()
+        if not symbol:
+            return [], ""
+        points, chosen_symbol = _fetch_futures_global_hist_series([symbol], start_date, end_date)
+        return points, f"futures_global_hist_em:{chosen_symbol or symbol}"
+    if fetch_kind == "forex_hist":
+        symbol = str(spec.get("symbol") or "").strip()
+        if not symbol:
+            return [], ""
+        return _fetch_forex_hist_series(symbol, start_date, end_date), f"forex_hist_em:{symbol}"
+    if fetch_kind == "global_index":
+        symbol = str(spec.get("symbol") or "").strip()
+        if not symbol:
+            return [], ""
+        return _fetch_global_index_hist_series(symbol, start_date, end_date), f"index_global_hist_em:{symbol}"
+    if fetch_kind == "us_treasury_curve":
+        column_name = str(spec.get("column") or "").strip()
+        if not column_name:
+            return [], ""
+        points = _fetch_us_treasury_curve_series(column_name)
+        return _filter_points_to_window(points, start_date=start_date, end_date=end_date), f"us_treasury_curve:{column_name}"
+    if fetch_kind == "zhaomei_water_coal":
+        return _fetch_zhaomei_water_coal_series(), "zhaomei_water_coal"
+    if fetch_kind == "basis_proxy":
+        basis_var = str(spec.get("basis_var") or "").strip()
+        if not basis_var:
+            return [], ""
+        return _fetch_futures_basis_series(basis_var, start_date, end_date), f"futures_spot_price_daily:{basis_var}"
     return [], ""
 
 
@@ -422,4 +695,80 @@ def fetch_industry_price_rows_with_diagnostics(
         "indicator_status": indicator_status,
     }
     # TODO: persist per-source refresh diagnostics for trend analysis.
+    return out, diagnostics
+
+
+def fetch_external_data_rows(start_date: str | None = None, end_date: str | None = None) -> list[dict[str, Any]]:
+    """Fetch external indicator rows normalized for SQLite upsert."""
+    rows, _ = fetch_external_data_rows_with_diagnostics(start_date=start_date, end_date=end_date)
+    return rows
+
+
+def fetch_external_data_rows_with_diagnostics(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch external indicator rows and runtime diagnostics for source health and failures."""
+    start_date = start_date or _days_ago_yyyymmdd(400)
+    end_date = end_date or _today_yyyymmdd()
+    out: list[dict[str, Any]] = []
+    indicator_status: dict[str, dict[str, Any]] = {}
+    dns_snapshot = _build_dns_snapshot()
+
+    for spec in EXTERNAL_DATA_SPECS:
+        indicator_key = spec["indicator_key"]
+        expected_hosts = _expected_hosts_for_external_spec(spec)
+        indicator_status[indicator_key] = {
+            "status": "unknown",
+            "source": None,
+            "error": None,
+            "hosts": expected_hosts,
+        }
+        try:
+            points, fetch_source = _fetch_single_external_series(spec, start_date=start_date, end_date=end_date)
+        except Exception as exc:
+            logger.warning("external_data indicator=%s fetch_failed err=%s", indicator_key, exc)
+            indicator_status[indicator_key] = {
+                "status": "fetch_failed",
+                "source": None,
+                "error": str(exc),
+                "hosts": expected_hosts,
+            }
+            continue
+
+        status_text = str(spec.get("status_on_success") or "ok")
+        if not points:
+            status_text = "no_data"
+        if expected_hosts and any(dns_snapshot.get(host) == "dns_failed" for host in expected_hosts):
+            status_text = "dns_failed"
+
+        indicator_status[indicator_key] = {
+            "status": status_text,
+            "source": fetch_source or None,
+            "error": None,
+            "hosts": expected_hosts,
+        }
+        logger.info(
+            "external_data indicator=%s points=%d source=%s",
+            indicator_key,
+            len(points),
+            fetch_source or "none",
+        )
+        for date_text, value in points:
+            out.append(
+                {
+                    "indicator_key": indicator_key,
+                    "indicator": spec["indicator"],
+                    "trade_date": date_text,
+                    "value": value,
+                    "source": spec["source"],
+                    "source_url": spec["source_url"],
+                    "note": spec["note"],
+                }
+            )
+
+    diagnostics = {
+        "dns": dns_snapshot,
+        "indicator_status": indicator_status,
+    }
     return out, diagnostics
