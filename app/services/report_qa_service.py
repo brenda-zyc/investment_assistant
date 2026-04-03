@@ -297,6 +297,23 @@ def _normalize_llm_answer_payload(payload: dict[str, Any]) -> dict[str, Any] | N
     }
 
 
+def _contains_numeric_claim(text: str) -> bool:
+    """Return whether one answer string contains an explicit numeric claim."""
+    return bool(re.search(r"\d", text))
+
+
+def _payload_with_numeric_claims_requires_citations(payload: dict[str, Any]) -> bool:
+    """Return whether an LLM payload mentions numeric facts without any usable citation snippet."""
+    texts = [str(payload.get("short_answer") or "").strip()]
+    texts.extend(str(item or "").strip() for item in payload.get("evidence", []) or [])
+    has_numeric_claim = any(_contains_numeric_claim(text) for text in texts if text)
+    if not has_numeric_claim:
+        return False
+
+    citations = payload.get("citations", []) or []
+    return not any(str(item.get("snippet") or "").strip() for item in citations if isinstance(item, dict))
+
+
 def _is_report_scoped_question(
     question: str,
     context: dict[str, Any],
@@ -490,6 +507,15 @@ def answer_report_question(
             )
             if isinstance(llm_answer, dict):
                 normalized_payload = _normalize_llm_answer_payload(llm_answer)
+                if normalized_payload is not None:
+                    if _payload_with_numeric_claims_requires_citations(normalized_payload):
+                        logger.warning(
+                            "report_qa numeric_llm_payload_without_citations symbol=%s report_key=%s question=%s",
+                            symbol,
+                            report_key,
+                            llm_question,
+                        )
+                        normalized_payload = None
                 if normalized_payload is not None:
                     normalized_payload["mode"] = "llm_hybrid"
                     normalized_payload["updated_session_summary"] = updated_summary

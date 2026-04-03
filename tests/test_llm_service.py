@@ -132,6 +132,9 @@ def test_answer_report_question_with_llm_uses_post_chat_completion_and_returns_p
     assert captured["timeout"] == 20
     assert captured["messages"][0]["role"] == "system"
     assert "report-scoped financial Q&A assistant" in captured["messages"][0]["content"]
+    prompt_text = captured["messages"][1]["content"]
+    assert "If you mention any numeric value" in prompt_text
+    assert "\"citations\"" in prompt_text
 
 
 def test_post_chat_completion_logs_connection_failure(caplog, monkeypatch) -> None:

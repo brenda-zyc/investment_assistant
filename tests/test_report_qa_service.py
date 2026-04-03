@@ -409,6 +409,51 @@ def test_answer_report_question_falls_back_when_llm_payload_has_no_answer_conten
     assert payload["session_reset"] is False
 
 
+def test_answer_report_question_falls_back_when_numeric_llm_answer_has_no_citations(monkeypatch) -> None:
+    """Numeric claims without citations should not be surfaced as hybrid report answers."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "000333|https://example.com/report.pdf",
+        {
+            "symbol": "000333",
+            "report": {"title": "2025年年度报告", "document_url": "https://example.com/report.pdf"},
+            "report_text": "海外收入同比增长43.12%，经营现金流改善。",
+            "answers": [
+                {
+                    "question": "净利润是否可持续？",
+                    "summary": "收入、利润和资本回报率信号整体稳定，利润延续性较强。",
+                    "evidence": ["收入 CAGR = 8.52%。", "最新收入同比 = 43.12%。"],
+                }
+            ],
+            "llm_analysis": {"summary": "海外业务和 ToB 业务带动增长。"},
+            "extracted_metrics": {"revenue": 100.0, "net_profit": 10.0},
+        },
+    )
+
+    def fake_llm(**kwargs):
+        return {
+            "short_answer": "今年收入同比增长43.12%，主要来自海外业务。",
+            "evidence": ["收入同比增长43.12%。"],
+            "citations": [],
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="今年利润增长主要来自哪里？",
+        history=[],
+        session_summary="",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert "43.12%" not in payload["short_answer"]
+    assert payload["citations"] == []
+
+
 def test_answer_report_question_logs_unusable_llm_payload(caplog, monkeypatch) -> None:
     """Unusable LLM payloads should be logged before the service falls back to rule-based answers."""
     report_qa_service.clear_report_context_cache()

@@ -294,10 +294,18 @@ def answer_report_question_with_llm(
         "extracted_metrics": extracted_metrics,
         "three_questions": answers,
         "llm_reading_notes": llm_analysis,
+        "output_schema": {
+            "short_answer": "string",
+            "evidence": ["string"],
+            "citations": [{"source": "report_text", "snippet": "string"}],
+            "confidence": "high | medium | low",
+        },
         "report_text": report_text[:16000],
         "constraints": [
             "Use only the provided annual-report context.",
             "Do not give buy or sell advice.",
+            "If you mention any numeric value, ratio, percentage, amount, or year, include at least one citation snippet that directly supports it.",
+            "If the report text does not support a requested number, say the report does not clearly provide it instead of inferring.",
             "Return JSON only.",
         ],
     }
