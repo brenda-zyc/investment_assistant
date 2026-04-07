@@ -237,3 +237,15 @@ def test_industry_table_includes_as_of_column() -> None:
 
     body = _function_body(source, "function renderIndustryRows(rows)")
     assert "${row.as_of ?? \"-\"}" in body
+
+
+def test_industry_table_humanizes_internal_source_codes() -> None:
+    """Industry rows should render readable source labels instead of internal fetcher ids."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "function humanizeSourceLabel(source)" in source
+    assert '["spot_hog_lean_price_soozhu", "搜猪网"]' in source
+    assert '["moa_market_info", "农业农村部"]' in source
+
+    body = _function_body(source, "function renderIndustryRows(rows)")
+    assert "humanizeSourceLabel(row.source || \"-\")" in body

@@ -8,10 +8,12 @@ import socket
 import time
 import warnings
 from typing import Any
+from urllib.parse import urljoin
 
 import akshare as ak
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 
 from app.services.common import _call_with_resilience, _find_col, to_date_str, to_float
 
@@ -27,6 +29,7 @@ _SOURCE_HOSTS: dict[str, list[str]] = {
     "macro_china_construction_price_index": ["datacenter-web.eastmoney.com"],
     "spot_hog_lean_price_soozhu": ["www.soozhu.com"],
     "spot_corn_price_soozhu": ["www.soozhu.com"],
+    "moa_market_info": ["scs.moa.gov.cn", "www.moa.gov.cn"],
     "futures_spot_price_daily": ["www.100ppi.com"],
     "forex_hist_em": ["push2his.eastmoney.com"],
     "index_global_hist_em": ["push2his.eastmoney.com"],
@@ -107,6 +110,12 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "special_source": "soozhu_corn",
         "sina_contract": "C0",
         "basis_var": "C",
+    },
+    {
+        "industry": "Agriculture",
+        "indicator_key": "beef_price",
+        "indicator": "beef_price",
+        "special_source": "moa_beef",
     },
     {
         "industry": "Chemicals",
@@ -328,6 +337,8 @@ def _expected_hosts_for_spec(spec: dict[str, str]) -> list[str]:
         hosts.update(_resolve_source_hosts("spot_hog_lean_price_soozhu"))
     if special_source == "soozhu_corn":
         hosts.update(_resolve_source_hosts("spot_corn_price_soozhu"))
+    if special_source == "moa_beef":
+        hosts.update(_resolve_source_hosts("moa_market_info"))
     if str(spec.get("sina_contract") or "").strip():
         hosts.update(_resolve_source_hosts("futures_zh_daily_sina"))
     if str(spec.get("basis_var") or "").strip():
@@ -445,6 +456,71 @@ def _fetch_corn_spot_series() -> list[tuple[str, float]]:
     return _normalize_history_frame(df, "日期", "价格")
 
 
+def _fetch_moa_beef_series(max_pages: int = 4) -> list[tuple[str, float]]:
+    """Fetch beef wholesale price points from MOA market-info article pages."""
+    root_url = "https://scs.moa.gov.cn/scxxfb/"
+    article_urls: list[str] = []
+    seen_urls: set[str] = set()
+    price_patterns = [
+        r"牛肉(?:平均)?(?:批发)?价格为?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+        r"牛肉(?:平均)?(?:批发)?价格为?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        r"牛肉(?:平均)?(?:批发)?价格每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+    ]
+
+    def _load_html(url: str) -> str:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.text
+
+    for page_index in range(max_pages):
+        listing_url = root_url if page_index == 0 else urljoin(root_url, f"index_{page_index}.htm")
+        listing_html = _call_with_resilience(lambda url=listing_url: _load_html(url))
+        soup = BeautifulSoup(listing_html, "html.parser")
+        for anchor in soup.find_all("a", href=True):
+            title_text = (anchor.get("title") or anchor.get_text(" ", strip=True) or "").strip()
+            if "牛肉" not in title_text:
+                continue
+            article_url = urljoin(listing_url, str(anchor.get("href") or "").strip())
+            if not article_url.endswith(".htm") or article_url in seen_urls:
+                continue
+            seen_urls.add(article_url)
+            article_urls.append(article_url)
+
+    points: list[tuple[str, float]] = []
+    for article_url in article_urls:
+        article_html = _call_with_resilience(lambda url=article_url: _load_html(url))
+        soup = BeautifulSoup(article_html, "html.parser")
+        article_text = soup.get_text(" ", strip=True)
+
+        trade_date = None
+        date_match = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", article_text)
+        if date_match:
+            trade_date = (
+                f"{int(date_match.group(1)):04d}-"
+                f"{int(date_match.group(2)):02d}-"
+                f"{int(date_match.group(3)):02d}"
+            )
+        else:
+            url_match = re.search(r"t(\d{4})(\d{2})(\d{2})_", article_url)
+            if url_match:
+                trade_date = f"{url_match.group(1)}-{url_match.group(2)}-{url_match.group(3)}"
+
+        if not trade_date:
+            continue
+
+        value = None
+        for pattern in price_patterns:
+            price_match = re.search(pattern, article_text)
+            if price_match:
+                value = to_float(price_match.group(1))
+                break
+        if value is None:
+            continue
+        points.append((trade_date, value))
+
+    return _dedupe_points(points)
+
+
 def _fetch_forex_hist_series(symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
     """Fetch one forex history series from Eastmoney and return latest-close points."""
     df = _call_with_resilience(ak.forex_hist_em, symbol=symbol)
@@ -560,6 +636,10 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
         points = _fetch_corn_spot_series()
         if points:
             return points, "spot_corn_price_soozhu"
+    if special_source == "moa_beef":
+        points = _fetch_moa_beef_series()
+        if points:
+            return points, "moa_market_info"
 
     sina_contract = str(spec.get("sina_contract") or "").strip()
     if sina_contract:

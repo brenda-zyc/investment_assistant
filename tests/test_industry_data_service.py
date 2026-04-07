@@ -282,6 +282,55 @@ def test_fetch_zhaomei_water_coal_series_parses_homepage_html(monkeypatch) -> No
     assert industry._fetch_zhaomei_water_coal_series() == [("2026-04-01", 762.0)]
 
 
+def test_fetch_moa_beef_series_parses_latest_article_listing(monkeypatch) -> None:
+    """Beef-price fetcher should parse official MOA market-info article links into dated points."""
+
+    class DummyResponse:
+        """Minimal HTTP response stub for MOA listing/article pages."""
+
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            """Mirror requests response API without error."""
+
+    listing_html = """
+    <html>
+      <body>
+        <ul>
+          <li><a href="/scxxfb/202504/t20250402_6472718.htm">4月2日：牛肉价格比昨天上升0.9%</a></li>
+          <li><a href="/scxxfb/202504/t20250402_6472719.htm">4月2日：鸡蛋价格比昨天持平</a></li>
+        </ul>
+      </body>
+    </html>
+    """
+    article_html = """
+    <html>
+      <body>
+        <h1>4月2日：牛肉价格比昨天上升0.9%</h1>
+        <div class="time">2025年04月02日 16:00</div>
+        <div id="zoom">
+          全国牛肉平均批发价格每公斤60.20元，比昨天上升0.9%。
+        </div>
+      </body>
+    </html>
+    """
+
+    def fake_get(url: str, timeout: int = 10):  # noqa: ARG001
+        if url == "https://scs.moa.gov.cn/scxxfb/":
+            return DummyResponse(listing_html)
+        if url == "https://scs.moa.gov.cn/scxxfb/index_1.htm":
+            return DummyResponse("<html><body></body></html>")
+        if url == "https://scs.moa.gov.cn/scxxfb/202504/t20250402_6472718.htm":
+            return DummyResponse(article_html)
+        raise AssertionError(f"unexpected url={url}")
+
+    monkeypatch.setattr(industry.requests, "get", fake_get)
+    monkeypatch.setattr(industry, "_call_with_resilience", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+
+    assert industry._fetch_moa_beef_series(max_pages=2) == [("2025-04-02", 60.2)]
+
+
 def test_external_data_is_stale_uses_weekly_window() -> None:
     fresh_date = (dt.date.today() - dt.timedelta(days=3)).isoformat()
     stale_date = (dt.date.today() - dt.timedelta(days=12)).isoformat()
