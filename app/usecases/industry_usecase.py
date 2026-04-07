@@ -290,19 +290,56 @@ def external_data_is_stale(rows: list[dict], max_age_days: int = 7) -> bool:
     return latest_date < (dt.date.today() - dt.timedelta(days=max_age_days))
 
 
+def _external_refresh_windows() -> list[str]:
+    """Return staged lookback windows for manual external refresh."""
+    today = dt.date.today()
+    return [
+        (today - dt.timedelta(days=7)).strftime("%Y%m%d"),
+        (today - dt.timedelta(days=30)).strftime("%Y%m%d"),
+        (today - dt.timedelta(days=90)).strftime("%Y%m%d"),
+    ]
+
+
+def _merge_external_refresh_diagnostics(base: dict, update: dict) -> dict:
+    """Merge staged external refresh diagnostics, preserving the latest known per-indicator result."""
+    base_dns = base.setdefault("dns", {})
+    base_dns.update(update.get("dns") or {})
+    base_status = base.setdefault("indicator_status", {})
+    base_status.update(update.get("indicator_status") or {})
+    return base
+
+
 def _refresh_external_data_cache(
     existing_external_rows: list[dict],
     warnings: list[str],
 ) -> dict:
     """Refresh external data cache and return runtime diagnostics for the latest fetch attempt."""
-    external_runtime_diagnostics: dict = {}
-    external_start_date = (dt.date.today() - dt.timedelta(days=400)).strftime("%Y%m%d")
+    external_runtime_diagnostics: dict = {"dns": {}, "indicator_status": {}}
+    pending_indicator_keys = {
+        str(spec.get("indicator_key") or "").strip()
+        for spec in get_external_data_specs()
+        if str(spec.get("indicator_key") or "").strip()
+    }
+    fetched_rows: list[dict] = []
     try:
-        fetched_external_rows, external_runtime_diagnostics = fetch_external_data_rows_with_diagnostics(
-            start_date=external_start_date
-        )
-        if fetched_external_rows:
-            upsert_external_data_points(fetched_external_rows)
+        for external_start_date in _external_refresh_windows():
+            if not pending_indicator_keys:
+                break
+            window_rows, window_diagnostics = fetch_external_data_rows_with_diagnostics(
+                start_date=external_start_date,
+                indicator_keys=pending_indicator_keys,
+            )
+            _merge_external_refresh_diagnostics(external_runtime_diagnostics, window_diagnostics)
+            if window_rows:
+                fetched_rows.extend(window_rows)
+                fetched_indicator_keys = {
+                    str(row.get("indicator_key") or "").strip()
+                    for row in window_rows
+                    if str(row.get("indicator_key") or "").strip()
+                }
+                pending_indicator_keys -= fetched_indicator_keys
+        if fetched_rows:
+            upsert_external_data_points(fetched_rows)
         elif existing_external_rows:
             warnings.append("External data refresh returned 0 rows; using existing cache.")
         else:

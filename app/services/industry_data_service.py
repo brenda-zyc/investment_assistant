@@ -707,6 +707,7 @@ def fetch_external_data_rows(start_date: str | None = None, end_date: str | None
 def fetch_external_data_rows_with_diagnostics(
     start_date: str | None = None,
     end_date: str | None = None,
+    indicator_keys: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Fetch external indicator rows and runtime diagnostics for source health and failures."""
     start_date = start_date or _days_ago_yyyymmdd(400)
@@ -714,9 +715,12 @@ def fetch_external_data_rows_with_diagnostics(
     out: list[dict[str, Any]] = []
     indicator_status: dict[str, dict[str, Any]] = {}
     dns_snapshot = _build_dns_snapshot()
+    requested_keys = {str(item).strip() for item in (indicator_keys or set()) if str(item).strip()}
 
     for spec in EXTERNAL_DATA_SPECS:
         indicator_key = spec["indicator_key"]
+        if requested_keys and indicator_key not in requested_keys:
+            continue
         expected_hosts = _expected_hosts_for_external_spec(spec)
         indicator_status[indicator_key] = {
             "status": "unknown",
