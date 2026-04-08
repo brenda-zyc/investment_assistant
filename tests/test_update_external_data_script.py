@@ -12,6 +12,7 @@ def test_script_refreshes_external_data_with_staged_windows(monkeypatch, capsys)
     today = dt.date.today()
     window_7 = (today - dt.timedelta(days=7)).strftime("%Y%m%d")
     window_30 = (today - dt.timedelta(days=30)).strftime("%Y%m%d")
+    window_90 = (today - dt.timedelta(days=90)).strftime("%Y%m%d")
     call_log: list[tuple[str, tuple[str, ...]]] = []
     upserted_rows: list[dict] = []
 
@@ -84,6 +85,79 @@ def test_script_refreshes_external_data_with_staged_windows(monkeypatch, capsys)
     ]
     assert [row["indicator_key"] for row in upserted_rows] == ["usd_cnh", "dollar_index"]
     output = capsys.readouterr().out
+    assert f"external_data window=7d start={window_7} pending=2 resolved=1" in output
+    assert f"external_data window=30d start={window_30} pending=1 resolved=1" in output
+    assert f"external_data summary window=7d ok=1 proxy=0 no_data=1 fetch_failed=0 dns_failed=0" in output
     assert "external_data rows=2 indicators_ok=2/2" in output
     assert "usd_cnh: status=ok source=forex_hist_em:USDCNH error=-" in output
     assert "dollar_index: status=ok source=index_global_hist_em:.DXY error=-" in output
+
+
+def test_script_stops_retrying_fetch_failed_indicators(monkeypatch, capsys) -> None:
+    """Window expansion should stop for indicators that already failed at the connection layer."""
+    today = dt.date.today()
+    window_7 = (today - dt.timedelta(days=7)).strftime("%Y%m%d")
+    window_30 = (today - dt.timedelta(days=30)).strftime("%Y%m%d")
+    window_90 = (today - dt.timedelta(days=90)).strftime("%Y%m%d")
+    call_log: list[tuple[str, tuple[str, ...]]] = []
+
+    monkeypatch.setattr(update_external_data, "init_db", lambda: None)
+    monkeypatch.setattr(
+        update_external_data,
+        "get_external_data_specs",
+        lambda: [
+            {"indicator_key": "eur_cnh"},
+            {"indicator_key": "gold_td"},
+        ],
+    )
+
+    def fake_fetch_external_data_rows_with_diagnostics(*, start_date=None, end_date=None, indicator_keys=None):
+        requested_keys = tuple(sorted(indicator_keys or []))
+        call_log.append((start_date, requested_keys))
+        if start_date == window_7:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "eur_cnh": {"status": "fetch_failed", "source": None, "error": "RemoteDisconnected"},
+                        "gold_td": {"status": "no_data", "source": None, "error": None},
+                    }
+                },
+            )
+        if start_date == window_30:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "gold_td": {"status": "no_data", "source": None, "error": None},
+                    }
+                },
+            )
+        if start_date == window_90:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "gold_td": {"status": "no_data", "source": None, "error": None},
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected window={start_date}")
+
+    monkeypatch.setattr(
+        update_external_data,
+        "fetch_external_data_rows_with_diagnostics",
+        fake_fetch_external_data_rows_with_diagnostics,
+    )
+    monkeypatch.setattr(update_external_data, "upsert_external_data_points", lambda rows: None)
+
+    update_external_data.main()
+
+    assert call_log == [
+        (window_7, ("eur_cnh", "gold_td")),
+        (window_30, ("gold_td",)),
+        (window_90, ("gold_td",)),
+    ]
+    output = capsys.readouterr().out
+    assert f"external_data summary window=7d ok=0 proxy=0 no_data=1 fetch_failed=1 dns_failed=0" in output
+    assert "eur_cnh: status=fetch_failed source=- error=RemoteDisconnected" in output

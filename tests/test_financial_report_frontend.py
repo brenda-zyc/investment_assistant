@@ -249,3 +249,12 @@ def test_industry_table_humanizes_internal_source_codes() -> None:
 
     body = _function_body(source, "function renderIndustryRows(rows)")
     assert "humanizeSourceLabel(row.source || \"-\")" in body
+
+
+def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> None:
+    """Live industry refresh should not clear the table before the new payload arrives."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function loadIndustryCycles()")
+
+    assert 'industryStatusEl.textContent = "Loading industry cycles...";' in body
+    assert 'industryTableBody.innerHTML = "";' not in body

@@ -209,7 +209,7 @@ def test_build_external_data_payload_keeps_no_data_when_cache_is_empty() -> None
     gold_td_row = next(row for row in payload if row["indicator_key"] == "gold_td")
     assert gold_td_row["value"] is None
     assert gold_td_row["as_of"] is None
-    assert gold_td_row["source"] == "东方财富"
+    assert gold_td_row["source"] == "上海黄金交易所"
     assert gold_td_row["status"] == "no_data"
 
 
@@ -218,6 +218,7 @@ def test_refresh_external_data_cache_uses_staged_windows_and_stops_after_first_h
     today = dt.date.today()
     window_7 = (today - dt.timedelta(days=7)).strftime("%Y%m%d")
     window_30 = (today - dt.timedelta(days=30)).strftime("%Y%m%d")
+    window_90 = (today - dt.timedelta(days=90)).strftime("%Y%m%d")
     call_log: list[tuple[str, tuple[str, ...]]] = []
     upserted_rows: list[dict] = []
 
@@ -351,3 +352,70 @@ def test_refresh_external_data_cache_falls_through_to_90_day_window(monkeypatch)
     assert call_log == [window_7, window_30, window_90]
     assert [row["indicator_key"] for row in upserted_rows] == ["thermal_coal_5500k"]
     assert diagnostics["indicator_status"]["thermal_coal_5500k"]["status"] == "proxy"
+
+
+def test_refresh_external_data_cache_stops_retrying_fetch_failed_indicator(monkeypatch) -> None:
+    """Connection-level failures should stop widening the window for the same indicator within one refresh."""
+    today = dt.date.today()
+    window_7 = (today - dt.timedelta(days=7)).strftime("%Y%m%d")
+    window_30 = (today - dt.timedelta(days=30)).strftime("%Y%m%d")
+    window_90 = (today - dt.timedelta(days=90)).strftime("%Y%m%d")
+    call_log: list[tuple[str, tuple[str, ...]]] = []
+
+    monkeypatch.setattr(
+        industry_usecase,
+        "get_external_data_specs",
+        lambda: [
+            {"indicator_key": "eur_cnh"},
+            {"indicator_key": "gold_td"},
+        ],
+    )
+
+    def fake_fetch_external_data_rows_with_diagnostics(*, start_date=None, end_date=None, indicator_keys=None):
+        requested_keys = tuple(sorted(indicator_keys or []))
+        call_log.append((start_date, requested_keys))
+        if start_date == window_7:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "eur_cnh": {"status": "fetch_failed", "error": "RemoteDisconnected"},
+                        "gold_td": {"status": "no_data", "error": None},
+                    }
+                },
+            )
+        if start_date == window_30:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "gold_td": {"status": "no_data", "error": None},
+                    }
+                },
+            )
+        if start_date == window_90:
+            return (
+                [],
+                {
+                    "indicator_status": {
+                        "gold_td": {"status": "no_data", "error": None},
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected window={start_date}")
+
+    monkeypatch.setattr(
+        industry_usecase,
+        "fetch_external_data_rows_with_diagnostics",
+        fake_fetch_external_data_rows_with_diagnostics,
+    )
+    monkeypatch.setattr(industry_usecase, "upsert_external_data_points", lambda rows: None)
+
+    diagnostics = industry_usecase._refresh_external_data_cache(existing_external_rows=[], warnings=[])
+
+    assert call_log == [
+        (window_7, ("eur_cnh", "gold_td")),
+        (window_30, ("gold_td",)),
+        (window_90, ("gold_td",)),
+    ]
+    assert diagnostics["indicator_status"]["eur_cnh"]["status"] == "fetch_failed"

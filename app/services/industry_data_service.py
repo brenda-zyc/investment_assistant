@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
 from io import StringIO
 import logging
@@ -21,11 +22,13 @@ logger = logging.getLogger(__name__)
 
 _HOST_RESOLVE_OK_CACHE: dict[str, float] = {}
 _TREASURY_CURVE_TABLE_CACHE: dict[str, tuple[float, list[pd.DataFrame]]] = {}
+INDUSTRY_FETCH_MAX_WORKERS = 4
 
 # API assumption: these hosts are the critical availability gates for each upstream family.
 _SOURCE_HOSTS: dict[str, list[str]] = {
     "futures_global_hist_em": ["push2his.eastmoney.com"],
     "futures_zh_daily_sina": ["stock2.finance.sina.com.cn"],
+    "spot_hist_sge": ["www.sge.com.cn"],
     "macro_china_construction_price_index": ["datacenter-web.eastmoney.com"],
     "spot_hog_lean_price_soozhu": ["www.soozhu.com"],
     "spot_corn_price_soozhu": ["www.soozhu.com"],
@@ -157,11 +160,11 @@ EXTERNAL_DATA_SPECS: list[dict[str, str]] = [
     {
         "indicator_key": "gold_td",
         "indicator": "黄金T+D",
-        "fetch_kind": "global_future",
-        "symbol": "AUTD",
-        "source": "东方财富",
-        "source_url": "https://quote.eastmoney.com/globalfuture/AUTD.html?jump_to_web=true",
-        "note": "直接抓取黄金 T+D 历史行情最新值。",
+        "fetch_kind": "sge_spot",
+        "symbol": "Au(T+D)",
+        "source": "上海黄金交易所",
+        "source_url": "https://www.sge.com.cn/sjzx/mrhq",
+        "note": "直接抓取上金所 Au(T+D) 历史行情最新值。",
         "status_on_success": "ok",
     },
     {
@@ -227,12 +230,13 @@ EXTERNAL_DATA_SPECS: list[dict[str, str]] = [
     {
         "indicator_key": "thermal_coal_5500k",
         "indicator": "煤炭5500K：动力煤",
-        "fetch_kind": "basis_proxy",
+        "fetch_kind": "thermal_coal_proxy",
+        "sina_contract": "ZC0",
         "basis_var": "ZC",
-        "source": "100ppi（代理）",
-        "source_url": "https://www.100ppi.com/sf/",
-        "note": "原中国煤炭市场网页面不稳定，暂用 100ppi 动力煤现货代理值。",
-        "status_on_success": "proxy",
+        "source": "新浪财经",
+        "source_url": "https://finance.sina.com.cn/futures/quotes/ZC0.shtml",
+        "note": "优先抓取新浪动力煤主连日线，失败时回退到 100ppi 代理值。",
+        "status_on_success": "ok",
     },
     {
         "indicator_key": "cement_coal_5500k",
@@ -325,6 +329,11 @@ def _build_dns_snapshot() -> dict[str, str]:
     return {host: _host_status_text(host) for host in hosts}
 
 
+def _all_hosts_dns_failed(hosts: list[str], dns_snapshot: dict[str, str]) -> bool:
+    """Return True when every expected upstream host fails DNS preflight."""
+    return bool(hosts) and all(dns_snapshot.get(host) == "dns_failed" for host in hosts)
+
+
 def _expected_hosts_for_spec(spec: dict[str, str]) -> list[str]:
     """Infer candidate hosts for an indicator based on configured source fallbacks."""
     hosts: set[str] = set()
@@ -351,6 +360,8 @@ def _expected_hosts_for_external_spec(spec: dict[str, str]) -> list[str]:
     fetch_kind = str(spec.get("fetch_kind") or "").strip()
     if fetch_kind == "global_future":
         return _resolve_source_hosts("futures_global_hist_em")
+    if fetch_kind == "sge_spot":
+        return _resolve_source_hosts("spot_hist_sge")
     if fetch_kind == "forex_hist":
         return _resolve_source_hosts("forex_hist_em")
     if fetch_kind == "global_index":
@@ -361,6 +372,13 @@ def _expected_hosts_for_external_spec(spec: dict[str, str]) -> list[str]:
         return _resolve_source_hosts("zhaomei_water_coal")
     if fetch_kind == "basis_proxy":
         return _resolve_source_hosts("futures_spot_price_daily")
+    if fetch_kind == "thermal_coal_proxy":
+        return sorted(
+            {
+                *(_resolve_source_hosts("futures_zh_daily_sina")),
+                *(_resolve_source_hosts("futures_spot_price_daily")),
+            }
+        )
     return []
 
 
@@ -369,12 +387,14 @@ def _fetch_futures_basis_series(var_symbol: str, start_date: str, end_date: str)
     if not _is_host_resolvable("www.100ppi.com"):
         logger.warning("industry_cycles host_unreachable=www.100ppi.com skip_symbol=%s", var_symbol)
         return []
-    df = _call_with_resilience(
-        ak.futures_spot_price_daily,
-        start_day=start_date,
-        end_day=end_date,
-        vars_list=[var_symbol],
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        df = _call_with_resilience(
+            ak.futures_spot_price_daily,
+            start_day=start_date,
+            end_day=end_date,
+            vars_list=[var_symbol],
+        )
     if df is None or df.empty:
         return []
     if not {"var", "sp", "date"}.issubset(set(df.columns)):
@@ -391,11 +411,13 @@ def _fetch_futures_global_hist_series(
     """Fetch global futures history from candidate symbols and return first non-empty result."""
     start_text = to_date_str(start_date)
     end_text = to_date_str(end_date)
+    last_exc: Exception | None = None
     for symbol in symbol_candidates:
         try:
             df = _call_with_resilience(ak.futures_global_hist_em, symbol=symbol)
         except Exception as exc:
             logger.warning("industry_cycles global_hist failed symbol=%s err=%s", symbol, exc)
+            last_exc = exc
             continue
         if df is None or df.empty:
             continue
@@ -409,6 +431,8 @@ def _fetch_futures_global_hist_series(
             points = [point for point in points if start_text <= point[0] <= end_text]
         if points:
             return points, symbol
+    if last_exc is not None:
+        raise last_exc
     return [], ""
 
 
@@ -430,6 +454,15 @@ def _fetch_futures_daily_sina_series(contract_symbol: str, start_date: str, end_
     if not start_text or not end_text:
         return points
     return [point for point in points if start_text <= point[0] <= end_text]
+
+
+def _fetch_sge_spot_hist_series(symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
+    """Fetch SGE daily close history for precious-metal spot/T+D instruments."""
+    df = _call_with_resilience(ak.spot_hist_sge, symbol=symbol)
+    if df is None or df.empty:
+        return []
+    points = _normalize_history_frame(df, "date", "close")
+    return _filter_points_to_window(points, start_date=start_date, end_date=end_date)
 
 
 def _fetch_construction_index_series() -> list[tuple[str, float]]:
@@ -456,39 +489,89 @@ def _fetch_corn_spot_series() -> list[tuple[str, float]]:
     return _normalize_history_frame(df, "日期", "价格")
 
 
-def _fetch_moa_beef_series(max_pages: int = 4) -> list[tuple[str, float]]:
+def _extract_moa_article_date(article_url: str) -> str | None:
+    """Extract article date from MOA article URL when the path embeds `tYYYYMMDD_`."""
+    url_match = re.search(r"t(\d{4})(\d{2})(\d{2})_", article_url)
+    if not url_match:
+        return None
+    return f"{url_match.group(1)}-{url_match.group(2)}-{url_match.group(3)}"
+
+
+def _fetch_moa_beef_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    max_pages: int = 8,
+    max_articles: int = 40,
+) -> list[tuple[str, float]]:
     """Fetch beef wholesale price points from MOA market-info article pages."""
-    root_url = "https://scs.moa.gov.cn/scxxfb/"
-    article_urls: list[str] = []
+    listing_roots = [
+        "https://scs.moa.gov.cn/scxxfb/",
+        "https://www.moa.gov.cn/xw/zxfb/",
+    ]
+    article_candidates: list[tuple[int, str]] = []
     seen_urls: set[str] = set()
     price_patterns = [
         r"牛肉(?:平均)?(?:批发)?价格为?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
         r"牛肉(?:平均)?(?:批发)?价格为?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
         r"牛肉(?:平均)?(?:批发)?价格每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+        r"牛肉(?:平均)?(?:批发)?价格\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        r"牛肉(?:平均)?(?:批发)?(?:价格)?(?:为)?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        r"牛肉(?:平均)?(?:批发)?(?:价格)?(?:为)?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
     ]
+    title_hints = ("牛肉", "市场动态", "市场信息", "农产品", "批发价格")
 
     def _load_html(url: str) -> str:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
+        response_encoding = getattr(response, "encoding", None)
+        apparent_encoding = getattr(response, "apparent_encoding", None)
+        if not response_encoding or str(response_encoding).lower() == "iso-8859-1":
+            response.encoding = apparent_encoding or "utf-8"
         return response.text
 
-    for page_index in range(max_pages):
-        listing_url = root_url if page_index == 0 else urljoin(root_url, f"index_{page_index}.htm")
-        listing_html = _call_with_resilience(lambda url=listing_url: _load_html(url))
-        soup = BeautifulSoup(listing_html, "html.parser")
-        for anchor in soup.find_all("a", href=True):
-            title_text = (anchor.get("title") or anchor.get_text(" ", strip=True) or "").strip()
-            if "牛肉" not in title_text:
+    for root_url in listing_roots:
+        for page_index in range(max_pages):
+            listing_url = root_url if page_index == 0 else urljoin(root_url, f"index_{page_index}.htm")
+            try:
+                listing_html = _call_with_resilience(lambda url=listing_url: _load_html(url))
+            except Exception as exc:
+                logger.warning("industry_cycles moa_beef listing_failed url=%s err=%s", listing_url, exc)
                 continue
-            article_url = urljoin(listing_url, str(anchor.get("href") or "").strip())
-            if not article_url.endswith(".htm") or article_url in seen_urls:
+            if not listing_html:
                 continue
-            seen_urls.add(article_url)
-            article_urls.append(article_url)
+            soup = BeautifulSoup(listing_html, "html.parser")
+            for anchor in soup.find_all("a", href=True):
+                href = str(anchor.get("href") or "").strip()
+                article_url = urljoin(listing_url, href)
+                if not href or not article_url.endswith(".htm") or article_url in seen_urls:
+                    continue
+                title_text = (anchor.get("title") or anchor.get_text(" ", strip=True) or "").strip()
+                if title_text and not any(hint in title_text for hint in title_hints):
+                    continue
+                seen_urls.add(article_url)
+                priority = 0 if "牛肉" in title_text else 1
+                article_candidates.append((priority, article_url))
 
     points: list[tuple[str, float]] = []
-    for article_url in article_urls:
-        article_html = _call_with_resilience(lambda url=article_url: _load_html(url))
+    article_candidates.sort(key=lambda item: item[1], reverse=True)
+    article_candidates.sort(key=lambda item: item[0])
+    start_text = to_date_str(start_date)
+    end_text = to_date_str(end_date)
+    for _, article_url in article_candidates[:max_articles]:
+        article_date_hint = _extract_moa_article_date(article_url)
+        if end_text and article_date_hint and article_date_hint > end_text:
+            continue
+        if start_text and article_date_hint and article_date_hint < start_text:
+            if points:
+                break
+            continue
+        try:
+            article_html = _call_with_resilience(lambda url=article_url: _load_html(url))
+        except Exception as exc:
+            logger.warning("industry_cycles moa_beef article_failed url=%s err=%s", article_url, exc)
+            continue
+        if not article_html:
+            continue
         soup = BeautifulSoup(article_html, "html.parser")
         article_text = soup.get_text(" ", strip=True)
 
@@ -501,11 +584,15 @@ def _fetch_moa_beef_series(max_pages: int = 4) -> list[tuple[str, float]]:
                 f"{int(date_match.group(3)):02d}"
             )
         else:
-            url_match = re.search(r"t(\d{4})(\d{2})(\d{2})_", article_url)
-            if url_match:
-                trade_date = f"{url_match.group(1)}-{url_match.group(2)}-{url_match.group(3)}"
+            trade_date = article_date_hint
 
         if not trade_date:
+            continue
+        if end_text and trade_date > end_text:
+            continue
+        if start_text and trade_date < start_text:
+            if points:
+                break
             continue
 
         value = None
@@ -612,6 +699,16 @@ def _days_ago_yyyymmdd(days: int) -> str:
     return (dt.date.today() - dt.timedelta(days=days)).strftime("%Y%m%d")
 
 
+def _max_recent_start_date(start_date: str, end_date: str, max_lookback_days: int) -> str:
+    """Return a start date capped to a recent lookback window while preserving valid input order."""
+    start_text = to_date_str(start_date)
+    end_text = to_date_str(end_date)
+    if not start_text or not end_text:
+        return start_date
+    capped_start = (dt.date.fromisoformat(end_text) - dt.timedelta(days=max_lookback_days)).isoformat()
+    return max(start_text, capped_start).replace("-", "")
+
+
 def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_date: str) -> tuple[list[tuple[str, float]], str]:
     """Fetch one indicator series using priority-ordered source fallbacks."""
     indicator_key = spec["indicator_key"]
@@ -619,9 +716,12 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
     global_symbols_text = str(spec.get("global_symbols") or "").strip()
     if global_symbols_text:
         candidates = [item.strip() for item in global_symbols_text.split(",") if item.strip()]
-        points, chosen_symbol = _fetch_futures_global_hist_series(candidates, start_date, end_date)
-        if points:
-            return points, f"futures_global_hist_em:{chosen_symbol}"
+        try:
+            points, chosen_symbol = _fetch_futures_global_hist_series(candidates, start_date, end_date)
+            if points:
+                return points, f"futures_global_hist_em:{chosen_symbol}"
+        except Exception as exc:
+            logger.warning("industry_cycles global source failed indicator=%s err=%s", indicator_key, exc)
 
     special_source = str(spec.get("special_source") or "").strip()
     if special_source == "construction_index":
@@ -637,7 +737,12 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
         if points:
             return points, "spot_corn_price_soozhu"
     if special_source == "moa_beef":
-        points = _fetch_moa_beef_series()
+        points = _fetch_moa_beef_series(
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=1,
+            max_articles=12,
+        )
         if points:
             return points, "moa_market_info"
 
@@ -678,6 +783,11 @@ def _fetch_single_external_series(spec: dict[str, str], start_date: str, end_dat
             return [], ""
         points, chosen_symbol = _fetch_futures_global_hist_series([symbol], start_date, end_date)
         return points, f"futures_global_hist_em:{chosen_symbol or symbol}"
+    if fetch_kind == "sge_spot":
+        symbol = str(spec.get("symbol") or "").strip()
+        if not symbol:
+            return [], ""
+        return _fetch_sge_spot_hist_series(symbol, start_date, end_date), f"spot_hist_sge:{symbol}"
     if fetch_kind == "forex_hist":
         symbol = str(spec.get("symbol") or "").strip()
         if not symbol:
@@ -701,7 +811,56 @@ def _fetch_single_external_series(spec: dict[str, str], start_date: str, end_dat
         if not basis_var:
             return [], ""
         return _fetch_futures_basis_series(basis_var, start_date, end_date), f"futures_spot_price_daily:{basis_var}"
+    if fetch_kind == "thermal_coal_proxy":
+        sina_contract = str(spec.get("sina_contract") or "").strip()
+        basis_var = str(spec.get("basis_var") or "").strip()
+        if sina_contract:
+            points = _fetch_futures_daily_sina_series(sina_contract, start_date, end_date)
+            if points:
+                return points, f"futures_zh_daily_sina:{sina_contract}"
+        if basis_var:
+            recent_start = _max_recent_start_date(start_date, end_date, max_lookback_days=14)
+            return _fetch_futures_basis_series(basis_var, recent_start, end_date), f"futures_spot_price_daily:{basis_var}"
     return [], ""
+
+
+def _external_row_metadata(spec: dict[str, str], fetch_source: str) -> tuple[str, str, str]:
+    """Return display metadata matching the actual upstream source used for the cached point."""
+    raw_source = (fetch_source or "").split(":", 1)[0]
+    if raw_source == "spot_hist_sge":
+        return (
+            "上海黄金交易所",
+            "https://www.sge.com.cn/sjzx/mrhq",
+            "直接抓取上金所 Au(T+D) 历史行情最新值。",
+        )
+    if raw_source == "futures_zh_daily_sina":
+        contract_symbol = fetch_source.split(":", 1)[1] if ":" in fetch_source else str(spec.get("sina_contract") or "")
+        return (
+            "新浪财经",
+            f"https://finance.sina.com.cn/futures/quotes/{contract_symbol}.shtml",
+            str(spec.get("note") or "").strip() or "直接抓取新浪财经期货主连历史行情最新值。",
+        )
+    if raw_source == "futures_spot_price_daily":
+        return (
+            "100ppi（代理）",
+            "https://www.100ppi.com/sf/",
+            "新浪动力煤主连未返回数据，回退到 100ppi 动力煤现货代理值。",
+        )
+    return (
+        str(spec.get("source") or "-"),
+        str(spec.get("source_url") or ""),
+        str(spec.get("note") or "-"),
+    )
+
+
+def _external_success_status(spec: dict[str, str], fetch_source: str, points: list[tuple[str, float]]) -> str:
+    """Return the success status that matches the actual source used for the fetched row."""
+    if not points:
+        return "no_data"
+    raw_source = (fetch_source or "").split(":", 1)[0]
+    if raw_source == "futures_spot_price_daily":
+        return "proxy"
+    return str(spec.get("status_on_success") or "ok")
 
 
 def fetch_industry_price_rows(start_date: str | None = None, end_date: str | None = None) -> list[dict[str, Any]]:
@@ -720,6 +879,7 @@ def fetch_industry_price_rows_with_diagnostics(
     out: list[dict[str, Any]] = []
     indicator_status: dict[str, dict[str, Any]] = {}
     dns_snapshot = _build_dns_snapshot()
+    fetchable_specs: list[dict[str, str]] = []
 
     for spec in INDUSTRY_INDICATOR_SPECS:
         indicator_key = spec["indicator_key"]
@@ -730,44 +890,86 @@ def fetch_industry_price_rows_with_diagnostics(
             "error": None,
             "hosts": expected_hosts,
         }
-        try:
-            points, source = _fetch_single_industry_series(spec, start_date=start_date, end_date=end_date)
-        except Exception as exc:
-            # API assumption: upstream instability is common; continue with other indicators.
-            logger.warning("industry_cycles indicator=%s fetch_failed err=%s", indicator_key, exc)
+        if _all_hosts_dns_failed(expected_hosts, dns_snapshot):
             indicator_status[indicator_key] = {
-                "status": "fetch_failed",
+                "status": "dns_failed",
                 "source": None,
-                "error": str(exc),
+                "error": None,
                 "hosts": expected_hosts,
             }
+            logger.warning(
+                "industry_cycles indicator=%s dns_preflight_failed hosts=%s",
+                indicator_key,
+                ",".join(expected_hosts),
+            )
             continue
-        source_name = (source or "").split(":", 1)[0] if source else ""
-        source_hosts = _resolve_source_hosts(source_name)
-        status_text = "ok" if points else "no_data"
-        dns_hosts = source_hosts or expected_hosts
-        if dns_hosts and any(dns_snapshot.get(host) == "dns_failed" for host in dns_hosts):
-            status_text = "dns_failed"
+        fetchable_specs.append(spec)
+
+    fetch_results: dict[str, dict[str, Any]] = {}
+    if fetchable_specs:
+        max_workers = min(len(fetchable_specs), INDUSTRY_FETCH_MAX_WORKERS)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(
+                    _fetch_single_industry_series,
+                    spec,
+                    start_date=start_date,
+                    end_date=end_date,
+                ): spec
+                for spec in fetchable_specs
+            }
+            for future in as_completed(future_map):
+                spec = future_map[future]
+                indicator_key = spec["indicator_key"]
+                expected_hosts = _expected_hosts_for_spec(spec)
+                try:
+                    points, source = future.result()
+                except Exception as exc:
+                    # API assumption: upstream instability is common; continue with other indicators.
+                    logger.warning("industry_cycles indicator=%s fetch_failed err=%s", indicator_key, exc)
+                    fetch_results[indicator_key] = {
+                        "points": [],
+                        "source": None,
+                        "status": "fetch_failed",
+                        "error": str(exc),
+                        "hosts": expected_hosts,
+                    }
+                    continue
+                source_name = (source or "").split(":", 1)[0] if source else ""
+                source_hosts = _resolve_source_hosts(source_name)
+                fetch_results[indicator_key] = {
+                    "points": points,
+                    "source": source or None,
+                    "status": "ok" if points else "no_data",
+                    "error": None,
+                    "hosts": source_hosts or expected_hosts,
+                }
+
+    for spec in INDUSTRY_INDICATOR_SPECS:
+        indicator_key = spec["indicator_key"]
+        result = fetch_results.get(indicator_key)
+        if result is None:
+            continue
         indicator_status[indicator_key] = {
-            "status": status_text,
-            "source": source or None,
-            "error": None,
-            "hosts": source_hosts or expected_hosts,
+            "status": result["status"],
+            "source": result["source"],
+            "error": result["error"],
+            "hosts": result["hosts"],
         }
         logger.info(
             "industry_cycles indicator=%s points=%d source=%s",
             indicator_key,
-            len(points),
-            source or "none",
+            len(result["points"]),
+            result["source"] or "none",
         )
-        for date_text, value in points:
+        for date_text, value in result["points"]:
             out.append(
                 {
                     "industry": spec["industry"],
                     "indicator": spec["indicator_key"],
                     "trade_date": date_text,
                     "value": value,
-                    "source": source,
+                    "source": result["source"],
                 }
             )
     diagnostics = {
@@ -808,6 +1010,19 @@ def fetch_external_data_rows_with_diagnostics(
             "error": None,
             "hosts": expected_hosts,
         }
+        if _all_hosts_dns_failed(expected_hosts, dns_snapshot):
+            indicator_status[indicator_key] = {
+                "status": "dns_failed",
+                "source": None,
+                "error": None,
+                "hosts": expected_hosts,
+            }
+            logger.warning(
+                "external_data indicator=%s dns_preflight_failed hosts=%s",
+                indicator_key,
+                ",".join(expected_hosts),
+            )
+            continue
         try:
             points, fetch_source = _fetch_single_external_series(spec, start_date=start_date, end_date=end_date)
         except Exception as exc:
@@ -820,11 +1035,7 @@ def fetch_external_data_rows_with_diagnostics(
             }
             continue
 
-        status_text = str(spec.get("status_on_success") or "ok")
-        if not points:
-            status_text = "no_data"
-        if expected_hosts and any(dns_snapshot.get(host) == "dns_failed" for host in expected_hosts):
-            status_text = "dns_failed"
+        status_text = _external_success_status(spec, fetch_source, points)
 
         indicator_status[indicator_key] = {
             "status": status_text,
@@ -838,6 +1049,7 @@ def fetch_external_data_rows_with_diagnostics(
             len(points),
             fetch_source or "none",
         )
+        display_source, display_source_url, display_note = _external_row_metadata(spec, fetch_source)
         for date_text, value in points:
             out.append(
                 {
@@ -845,9 +1057,9 @@ def fetch_external_data_rows_with_diagnostics(
                     "indicator": spec["indicator"],
                     "trade_date": date_text,
                     "value": value,
-                    "source": spec["source"],
-                    "source_url": spec["source_url"],
-                    "note": spec["note"],
+                    "source": display_source,
+                    "source_url": display_source_url,
+                    "note": display_note,
                 }
             )
 

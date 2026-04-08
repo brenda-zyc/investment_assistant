@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from app.core_logic import to_float
 from app.db import (
@@ -15,6 +16,8 @@ from app.services.industry_data_service import (
     get_external_data_specs,
     get_industry_indicator_specs,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso_date(value: object) -> dt.date | None:
@@ -300,6 +303,12 @@ def _external_refresh_windows() -> list[str]:
     ]
 
 
+def _external_refresh_window_specs() -> list[tuple[str, str]]:
+    """Return labeled lookback windows for staged external refresh logging."""
+    start_dates = _external_refresh_windows()
+    return [("7d", start_dates[0]), ("30d", start_dates[1]), ("90d", start_dates[2])]
+
+
 def _merge_external_refresh_diagnostics(base: dict, update: dict) -> dict:
     """Merge staged external refresh diagnostics, preserving the latest known per-indicator result."""
     base_dns = base.setdefault("dns", {})
@@ -307,6 +316,30 @@ def _merge_external_refresh_diagnostics(base: dict, update: dict) -> dict:
     base_status = base.setdefault("indicator_status", {})
     base_status.update(update.get("indicator_status") or {})
     return base
+
+
+def _terminal_external_statuses() -> set[str]:
+    """Return refresh statuses that should stop further lookback expansion in the same run."""
+    return {"fetch_failed", "dns_failed"}
+
+
+def _window_status_summary(indicator_status: dict[str, dict], indicator_keys: set[str]) -> dict[str, int]:
+    """Count per-status outcomes for one staged external refresh window."""
+    summary = {
+        "ok": 0,
+        "proxy": 0,
+        "no_data": 0,
+        "fetch_failed": 0,
+        "dns_failed": 0,
+        "other": 0,
+    }
+    for indicator_key in indicator_keys:
+        status = str((indicator_status.get(indicator_key) or {}).get("status") or "other")
+        if status not in summary:
+            summary["other"] += 1
+            continue
+        summary[status] += 1
+    return summary
 
 
 def _refresh_external_data_cache(
@@ -322,14 +355,22 @@ def _refresh_external_data_cache(
     }
     fetched_rows: list[dict] = []
     try:
-        for external_start_date in _external_refresh_windows():
+        for window_label, external_start_date in _external_refresh_window_specs():
             if not pending_indicator_keys:
                 break
+            pending_before = set(pending_indicator_keys)
             window_rows, window_diagnostics = fetch_external_data_rows_with_diagnostics(
                 start_date=external_start_date,
                 indicator_keys=pending_indicator_keys,
             )
             _merge_external_refresh_diagnostics(external_runtime_diagnostics, window_diagnostics)
+            resolved_indicator_keys: set[str] = set()
+            terminal_failure_keys = {
+                indicator_key
+                for indicator_key in pending_before
+                if str((window_diagnostics.get("indicator_status", {}).get(indicator_key) or {}).get("status") or "")
+                in _terminal_external_statuses()
+            }
             if window_rows:
                 fetched_rows.extend(window_rows)
                 fetched_indicator_keys = {
@@ -338,6 +379,31 @@ def _refresh_external_data_cache(
                     if str(row.get("indicator_key") or "").strip()
                 }
                 pending_indicator_keys -= fetched_indicator_keys
+                resolved_indicator_keys = fetched_indicator_keys
+            pending_indicator_keys -= terminal_failure_keys
+            status_summary = _window_status_summary(
+                window_diagnostics.get("indicator_status", {}) or {},
+                pending_before,
+            )
+            logger.info(
+                "external_refresh window=%s start=%s pending=%d resolved=%d terminal_failures=%d indicators=%s",
+                window_label,
+                external_start_date,
+                len(pending_before),
+                len(resolved_indicator_keys),
+                len(terminal_failure_keys),
+                ",".join(sorted(resolved_indicator_keys)) or "-",
+            )
+            logger.info(
+                "external_refresh summary window=%s ok=%d proxy=%d no_data=%d fetch_failed=%d dns_failed=%d other=%d",
+                window_label,
+                status_summary["ok"],
+                status_summary["proxy"],
+                status_summary["no_data"],
+                status_summary["fetch_failed"],
+                status_summary["dns_failed"],
+                status_summary["other"],
+            )
         if fetched_rows:
             upsert_external_data_points(fetched_rows)
         elif existing_external_rows:

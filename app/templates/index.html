@@ -2732,7 +2732,6 @@
       async function loadIndustryCycles() {
         loadIndustryBtn.disabled = true;
         industryStatusEl.textContent = "Loading industry cycles...";
-        industryTableBody.innerHTML = "";
 
         try {
           const res = await fetch(`${apiBase}/industry_cycles?refresh=true&refresh_external=false`);

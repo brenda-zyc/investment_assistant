@@ -34,6 +34,30 @@ def _merge_refresh_diagnostics(base: dict, update: dict) -> dict:
     return base
 
 
+def _terminal_statuses() -> set[str]:
+    """Return per-indicator refresh statuses that should stop later window retries."""
+    return {"fetch_failed", "dns_failed"}
+
+
+def _window_status_summary(indicator_status: dict[str, dict], indicator_keys: set[str]) -> dict[str, int]:
+    """Count staged refresh outcomes for the requested indicator keys."""
+    summary = {
+        "ok": 0,
+        "proxy": 0,
+        "no_data": 0,
+        "fetch_failed": 0,
+        "dns_failed": 0,
+        "other": 0,
+    }
+    for indicator_key in indicator_keys:
+        status = str((indicator_status.get(indicator_key) or {}).get("status") or "other")
+        if status not in summary:
+            summary["other"] += 1
+            continue
+        summary[status] += 1
+    return summary
+
+
 def _refresh_external_rows_staged() -> tuple[list[dict], dict]:
     """Fetch external rows with 7/30/90-day windows and stop per indicator once a value is found."""
     pending_indicator_keys = {
@@ -44,15 +68,34 @@ def _refresh_external_rows_staged() -> tuple[list[dict], dict]:
     all_rows: list[dict] = []
     diagnostics: dict = {"dns": {}, "indicator_status": {}}
 
-    for start_date in _external_refresh_windows():
+    for window_days, start_date in zip((7, 30, 90), _external_refresh_windows(), strict=True):
         if not pending_indicator_keys:
             break
+        pending_before = set(pending_indicator_keys)
         window_rows, window_diagnostics = fetch_external_data_rows_with_diagnostics(
             start_date=start_date,
             indicator_keys=pending_indicator_keys,
         )
         _merge_refresh_diagnostics(diagnostics, window_diagnostics)
+        resolved_keys: set[str] = set()
+        terminal_failure_keys = {
+            indicator_key
+            for indicator_key in pending_before
+            if str((window_diagnostics.get("indicator_status", {}).get(indicator_key) or {}).get("status") or "")
+            in _terminal_statuses()
+        }
         if not window_rows:
+            print(
+                f"external_data window={window_days}d start={start_date} "
+                f"pending={len(pending_before)} resolved=0"
+            )
+            pending_indicator_keys -= terminal_failure_keys
+            summary = _window_status_summary(window_diagnostics.get("indicator_status", {}) or {}, pending_before)
+            print(
+                f"external_data summary window={window_days}d "
+                f"ok={summary['ok']} proxy={summary['proxy']} no_data={summary['no_data']} "
+                f"fetch_failed={summary['fetch_failed']} dns_failed={summary['dns_failed']}"
+            )
             continue
         all_rows.extend(window_rows)
         fetched_keys = {
@@ -60,7 +103,19 @@ def _refresh_external_rows_staged() -> tuple[list[dict], dict]:
             for row in window_rows
             if str(row.get("indicator_key") or "").strip()
         }
+        resolved_keys = fetched_keys
         pending_indicator_keys -= fetched_keys
+        pending_indicator_keys -= terminal_failure_keys
+        print(
+            f"external_data window={window_days}d start={start_date} "
+            f"pending={len(pending_before)} resolved={len(resolved_keys)}"
+        )
+        summary = _window_status_summary(window_diagnostics.get("indicator_status", {}) or {}, pending_before)
+        print(
+            f"external_data summary window={window_days}d "
+            f"ok={summary['ok']} proxy={summary['proxy']} no_data={summary['no_data']} "
+            f"fetch_failed={summary['fetch_failed']} dns_failed={summary['dns_failed']}"
+        )
     return all_rows, diagnostics
 
 
