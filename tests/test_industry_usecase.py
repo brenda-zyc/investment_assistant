@@ -213,6 +213,65 @@ def test_build_external_data_payload_keeps_no_data_when_cache_is_empty() -> None
     assert gold_td_row["status"] == "no_data"
 
 
+def test_build_industry_cycles_payload_exposes_indicator_key_and_display_name() -> None:
+    rows = [
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal_index",
+            "trade_date": "2026-04-09",
+            "value": 762.0,
+            "source": "sxcoal_cci5500",
+        }
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+
+    assert thermal_row["display_name"] == "动力煤价格指数（CCI5500）"
+
+
+def test_build_industry_cycles_payload_filters_legacy_indicator_keys() -> None:
+    rows = [
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal",
+            "trade_date": "2026-04-09",
+            "value": 700.0,
+            "source": "futures_zh_daily_sina:ZC0",
+        },
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal_index",
+            "trade_date": "2026-04-09",
+            "value": 762.0,
+            "source": "sxcoal_cci5500",
+        },
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+
+    assert thermal_row["value"] == 762.0
+
+
+def test_build_industry_cycles_payload_hides_legacy_source_rows_for_new_index_specs() -> None:
+    rows = [
+        {
+            "industry": "Steel & Construction",
+            "indicator": "cement_price_index",
+            "trade_date": "2026-04-08",
+            "value": 101.2,
+            "source": "macro_china_construction_price_index",
+        }
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    cement_row = next(row for row in payload["rows"] if row["indicator_key"] == "cement_price_index")
+
+    assert cement_row["value"] is None
+    assert cement_row["status"] == "no_data"
+
+
 def test_refresh_external_data_cache_uses_staged_windows_and_stops_after_first_hit(monkeypatch) -> None:
     """External refresh should probe 7/30/90-day windows and stop requesting indicators once found."""
     today = dt.date.today()

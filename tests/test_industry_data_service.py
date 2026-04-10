@@ -22,6 +22,77 @@ def test_normalize_history_frame_filters_invalid_and_dedupes() -> None:
     assert points == [("2024-01-01", 5.0), ("2024-01-03", 12.0)]
 
 
+def test_industry_indicator_specs_use_index_keys_and_display_names() -> None:
+    specs = industry.get_industry_indicator_specs()
+    keys = {item["indicator_key"] for item in specs}
+
+    assert "thermal_coal_index" in keys
+    assert "cement_price_index" in keys
+    assert "thermal_coal" not in keys
+    assert "cement_price" not in keys
+
+    thermal = next(item for item in specs if item["indicator_key"] == "thermal_coal_index")
+    cement = next(item for item in specs if item["indicator_key"] == "cement_price_index")
+
+    assert thermal["display_name"] == "动力煤价格指数（CCI5500）"
+    assert cement["display_name"] == "水泥价格指数（CEMPI）"
+
+
+def test_expected_hosts_for_spec_supports_new_index_sources() -> None:
+    thermal = {
+        "indicator_key": "thermal_coal_index",
+        "special_source": "sxcoal_cci5500",
+    }
+    cement = {
+        "indicator_key": "cement_price_index",
+        "special_source": "cempi_index",
+    }
+
+    thermal_hosts = industry._expected_hosts_for_spec(thermal)
+    cement_hosts = industry._expected_hosts_for_spec(cement)
+
+    assert "www.sxcoal.com" in thermal_hosts
+    assert "index.ccement.com" in cement_hosts
+
+
+def test_fetch_single_industry_series_routes_new_index_sources(monkeypatch) -> None:
+    thermal_spec = {
+        "indicator_key": "thermal_coal_index",
+        "special_source": "sxcoal_cci5500",
+    }
+    cement_spec = {
+        "indicator_key": "cement_price_index",
+        "special_source": "cempi_index",
+    }
+
+    monkeypatch.setattr(
+        industry,
+        "_fetch_sxcoal_cci5500_series",
+        lambda start_date=None, end_date=None: [("2026-04-09", 762.0)],
+    )
+    monkeypatch.setattr(
+        industry,
+        "_fetch_cempi_index_series",
+        lambda start_date=None, end_date=None: [("2026-04-08", 101.2)],
+    )
+
+    thermal_points, thermal_source = industry._fetch_single_industry_series(
+        thermal_spec,
+        start_date="20260401",
+        end_date="20260410",
+    )
+    cement_points, cement_source = industry._fetch_single_industry_series(
+        cement_spec,
+        start_date="20260401",
+        end_date="20260410",
+    )
+
+    assert thermal_points == [("2026-04-09", 762.0)]
+    assert thermal_source == "sxcoal_cci5500"
+    assert cement_points == [("2026-04-08", 101.2)]
+    assert cement_source == "cempi_index"
+
+
 def test_fetch_industry_price_rows_with_diagnostics_deterministic(monkeypatch) -> None:
     specs = [
         {"industry": "A", "indicator_key": "ok_indicator", "indicator": "ok_indicator"},
@@ -699,6 +770,45 @@ def test_fetch_single_external_series_uses_sge_for_gold_td(monkeypatch) -> None:
 
     assert points == [("2026-04-02", 588.2)]
     assert source == "spot_hist_sge:Au(T+D)"
+
+
+def test_fetch_sxcoal_cci5500_series_parses_latest_point(monkeypatch) -> None:
+    html = """
+    <html><body>
+      <a href="/news/detail/2042173180508495873">4月9日CCI5500动力煤价格指数上涨2.0元</a>
+      <div>CCI5500 762 元/吨</div>
+    </body></html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(industry.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    assert industry._fetch_sxcoal_cci5500_series() == [("2026-04-09", 762.0)]
+
+
+def test_fetch_cempi_index_series_parses_latest_point(monkeypatch) -> None:
+    html = """
+    <html><body>
+      <div>CEMPI</div>
+      <div>2026-04-08</div>
+      <div>101.23</div>
+    </body></html>
+    """
+
+    class FakeResponse:
+        text = html
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(industry.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    assert industry._fetch_cempi_index_series() == [("2026-04-08", 101.23)]
 
 
 def test_fetch_single_external_series_uses_sina_before_basis_proxy(monkeypatch) -> None:

@@ -61,7 +61,9 @@ def _build_indicator_row(
     """Build one normalized row for industry cycle output."""
     return {
         "industry": spec["industry"],
+        "indicator_key": spec["indicator_key"],
         "indicator": spec["indicator"],
+        "display_name": spec.get("display_name") or spec["indicator"],
         "value": value,
         "1y_percentile": percentile_1y,
         "5y_percentile": percentile_5y,
@@ -72,16 +74,56 @@ def _build_indicator_row(
     }
 
 
+def _industry_allowed_source_prefixes(spec: dict[str, str]) -> set[str]:
+    """Return raw source prefixes that remain valid for the current indicator mapping."""
+    prefixes: set[str] = set()
+    if str(spec.get("global_symbols") or "").strip():
+        prefixes.add("futures_global_hist_em")
+    special_source = str(spec.get("special_source") or "").strip()
+    if special_source == "sxcoal_cci5500":
+        prefixes.add("sxcoal_cci5500")
+    elif special_source == "cempi_index":
+        prefixes.add("cempi_index")
+    elif special_source == "construction_index":
+        prefixes.add("macro_china_construction_price_index")
+    elif special_source == "soozhu_pork":
+        prefixes.update({"moa_market_info", "spot_hog_lean_price_soozhu"})
+    elif special_source == "soozhu_corn":
+        prefixes.add("spot_corn_price_soozhu")
+    elif special_source == "moa_beef":
+        prefixes.add("moa_market_info")
+    if str(spec.get("sina_contract") or "").strip():
+        prefixes.add("futures_zh_daily_sina")
+    if str(spec.get("basis_var") or "").strip():
+        prefixes.add("futures_spot_price_daily")
+    return prefixes
+
+
+def _industry_source_matches_spec(spec: dict[str, str], source: str | None) -> bool:
+    """Return whether a cached row source is still compatible with the current spec."""
+    raw_source = str(source or "").strip()
+    if not raw_source:
+        return True
+    allowed_prefixes = _industry_allowed_source_prefixes(spec)
+    if not allowed_prefixes:
+        return True
+    return raw_source.split(":", 1)[0] in allowed_prefixes
+
+
 def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = None) -> dict:
     """Build current value plus 1Y/5Y percentile payload for industry indicators."""
     grouped_points: dict[str, list[tuple[dt.date, float]]] = {}
     grouped_meta: dict[str, dict[str, str]] = {}
     diagnostics = diagnostics or {}
     indicator_status_map: dict[str, dict] = diagnostics.get("indicator_status", {}) or {}
+    specs = get_industry_indicator_specs()
 
     for row in rows:
         indicator_key = str(row.get("indicator") or "").strip()
         if not indicator_key:
+            continue
+        spec = next((item for item in specs if item["indicator_key"] == indicator_key), None)
+        if spec is not None and not _industry_source_matches_spec(spec, row.get("source")):
             continue
         trade_date = _parse_iso_date(row.get("trade_date"))
         value = to_float(row.get("value"))
@@ -100,7 +142,6 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     output_rows: list[dict] = []
     grouped_output_rows: dict[str, list[dict]] = {}
     as_of_candidates: list[str] = []
-    specs = get_industry_indicator_specs()
 
     for spec in specs:
         indicator_key = spec["indicator_key"]
