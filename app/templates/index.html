@@ -1054,7 +1054,7 @@
                   <th>Industry</th>
                   <th>Indicator</th>
                   <th>Value</th>
-                  <th>As Of</th>
+                  <th>Indicator As Of</th>
                   <th>1Y Percentile</th>
                   <th>5Y Percentile</th>
                   <th>Source</th>
@@ -1079,7 +1079,7 @@
                 <tr>
                   <th>Indicator</th>
                   <th>Latest Value</th>
-                  <th>As Of</th>
+                  <th>Indicator As Of</th>
                   <th>Source</th>
                   <th>Link</th>
                   <th>Status</th>
@@ -1603,7 +1603,7 @@
           const noteText = row.error ? `${row.note || "-"} Error: ${row.error}` : row.note || "-";
           const tr = document.createElement("tr");
           tr.innerHTML = `
-            <td>${row.indicator ?? "-"}</td>
+            <td>${row.display_name ?? row.indicator ?? "-"}</td>
             <td>${formatNumber(row.value, 4)}</td>
             <td>${row.as_of ?? "-"}</td>
             <td>${row.source ?? "-"}</td>
@@ -2528,6 +2528,8 @@
           ["index_global_hist_em", "东方财富"],
           ["us_treasury_curve", "美国财政部"],
           ["zhaomei_water_coal", "找煤网"],
+          ["sxcoal_cci5500", "Sxcoal"],
+          ["cempi_index", "水泥网"],
         ]);
         return labelMap.get(rawKey) || normalized || "-";
       }
@@ -2543,7 +2545,7 @@
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td>${row.industry ?? "-"}</td>
-            <td>${row.indicator ?? "-"}</td>
+            <td>${row.display_name ?? row.indicator ?? "-"}</td>
             <td>${formatNumber(row.value)}</td>
             <td>${row.as_of ?? "-"}</td>
             <td>${oneYear}</td>

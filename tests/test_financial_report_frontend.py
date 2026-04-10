@@ -229,11 +229,11 @@ def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
     assert 'row.status === "proxy" || row.status === "dns_failed" || row.status === "cached"' in body
 
 
-def test_industry_table_includes_as_of_column() -> None:
-    """Industry table should expose per-row extraction dates."""
+def test_industry_table_uses_indicator_as_of_column_label() -> None:
+    """Industry table should clarify that each row carries its own observation date."""
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
-    assert "<th>As Of</th>" in source
+    assert "<th>Indicator As Of</th>" in source
 
     body = _function_body(source, "function renderIndustryRows(rows)")
     assert "${row.as_of ?? \"-\"}" in body
@@ -246,9 +246,19 @@ def test_industry_table_humanizes_internal_source_codes() -> None:
     assert "function humanizeSourceLabel(source)" in source
     assert '["spot_hog_lean_price_soozhu", "搜猪网"]' in source
     assert '["moa_market_info", "农业农村部"]' in source
+    assert '["sxcoal_cci5500", "Sxcoal"]' in source
+    assert '["cempi_index", "水泥网"]' in source
 
     body = _function_body(source, "function renderIndustryRows(rows)")
     assert "humanizeSourceLabel(row.source || \"-\")" in body
+
+
+def test_industry_table_prefers_display_name_over_internal_key() -> None:
+    """Industry rows should render human-readable indicator labels in the table."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "function renderIndustryRows(rows)")
+
+    assert "${row.display_name ?? row.indicator ?? \"-\"}" in body
 
 
 def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> None:
