@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any
@@ -16,6 +17,43 @@ PROXY_ENV_KEYS = [
     "https_proxy",
     "all_proxy",
 ]
+
+_EXTERNAL_CALL_GATE = threading.Condition()
+_ACTIVE_EXTERNAL_CALLS = 0
+_NO_PROXY_OVERRIDE_ACTIVE = False
+
+
+@contextmanager
+def _shared_external_call():
+    """Allow normal upstream calls to run concurrently unless a no-proxy retry is active."""
+    global _ACTIVE_EXTERNAL_CALLS
+    with _EXTERNAL_CALL_GATE:
+        while _NO_PROXY_OVERRIDE_ACTIVE:
+            _EXTERNAL_CALL_GATE.wait()
+        _ACTIVE_EXTERNAL_CALLS += 1
+    try:
+        yield
+    finally:
+        with _EXTERNAL_CALL_GATE:
+            _ACTIVE_EXTERNAL_CALLS -= 1
+            if _ACTIVE_EXTERNAL_CALLS == 0:
+                _EXTERNAL_CALL_GATE.notify_all()
+
+
+@contextmanager
+def _exclusive_no_proxy_call():
+    """Run one no-proxy retry while blocking overlapping shared upstream calls."""
+    global _NO_PROXY_OVERRIDE_ACTIVE
+    with _EXTERNAL_CALL_GATE:
+        while _NO_PROXY_OVERRIDE_ACTIVE or _ACTIVE_EXTERNAL_CALLS > 0:
+            _EXTERNAL_CALL_GATE.wait()
+        _NO_PROXY_OVERRIDE_ACTIVE = True
+    try:
+        yield
+    finally:
+        with _EXTERNAL_CALL_GATE:
+            _NO_PROXY_OVERRIDE_ACTIVE = False
+            _EXTERNAL_CALL_GATE.notify_all()
 
 
 @contextmanager
@@ -63,13 +101,16 @@ def _call_with_resilience(func, *args, **kwargs):
     last_exc: Exception | None = None
     for attempt in range(3):
         try:
-            return func(*args, **kwargs)
+            with _shared_external_call():
+                return func(*args, **kwargs)
         except Exception as exc:  # pragma: no cover - upstream/network variability
             last_exc = exc
             if _should_retry_without_proxy(exc):
                 try:
-                    with without_proxy_env():
-                        return func(*args, **kwargs)
+                    # Clearing proxy env vars is process-global, so isolate that retry window.
+                    with _exclusive_no_proxy_call():
+                        with without_proxy_env():
+                            return func(*args, **kwargs)
                 except Exception as proxy_exc:
                     last_exc = proxy_exc
             if not _should_retry_network(last_exc):
