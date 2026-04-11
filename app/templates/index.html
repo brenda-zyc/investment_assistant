@@ -2348,7 +2348,7 @@
           reportSourceMetaEl.textContent = `${sourceTitle}${pageText}${tlsText}Content-Type: ${data.content_type || "-"}.`;
           renderReportCurrentMode(null);
           renderReportLlmStatus({ llm_enabled: false, llm_used: false });
-          const reportKey = data.report_key || data.session_key || null;
+          const reportKey = data.report_key || null;
           const activeSymbol = data.symbol || reportSymbol;
           if (activeSymbol) {
             reportCodeInput.value = activeSymbol;
@@ -2397,7 +2397,7 @@
           renderReportLlmStatus(data);
           renderReportLlmAnalysis(data.llm_analysis || null);
 
-          const reportKey = data.report_key || data.session_key || null;
+          const reportKey = data.report_key || null;
           const reportSymbol = data.symbol || reportCodeInput.value.trim() || null;
           if (reportSymbol) {
             reportCodeInput.value = reportSymbol;

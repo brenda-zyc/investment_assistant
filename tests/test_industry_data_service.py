@@ -457,8 +457,8 @@ def test_fetch_industry_price_rows_with_diagnostics_skips_fetch_when_dns_preflig
     assert status_map["pork_price"]["source"] is None
 
 
-def test_fetch_us_treasury_curve_series_falls_back_to_unverified_html(monkeypatch) -> None:
-    """Treasury parser should fall back to verify=False when local cert trust is incomplete."""
+def test_fetch_us_treasury_curve_series_falls_back_to_default_tls_html(monkeypatch) -> None:
+    """Treasury parser should retry via requests without disabling TLS verification."""
     industry._TREASURY_CURVE_TABLE_CACHE.clear()
 
     class DummyResponse:
@@ -488,7 +488,12 @@ def test_fetch_us_treasury_curve_series_falls_back_to_unverified_html(monkeypatc
         return func(*args, **kwargs)
 
     monkeypatch.setattr(industry, "_call_with_resilience", fake_resilience)
-    monkeypatch.setattr(industry.requests, "get", lambda *args, **kwargs: DummyResponse())
+
+    def fake_get(*args, **kwargs):  # noqa: ANN001
+        assert "verify" not in kwargs
+        return DummyResponse()
+
+    monkeypatch.setattr(industry.requests, "get", fake_get)
 
     points = industry._fetch_us_treasury_curve_series("6 Mo")
 

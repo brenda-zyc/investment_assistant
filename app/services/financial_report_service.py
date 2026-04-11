@@ -28,13 +28,21 @@ _HTTP_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+_OFFICIAL_DISCLOSURE_HOSTS = {
+    "www.cninfo.com.cn",
+    "static.cninfo.com.cn",
+    "www.sse.com.cn",
+    "static.sse.com.cn",
+    "www.szse.cn",
+    "disc.static.szse.cn",
+}
 _METRIC_NUM_RE = re.compile(r"([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|[+-]?\d+(?:\.\d+)?)\s*(亿|万|元|%)?")
 _SNIPPET_LEFT_CHARS = 20
 _SNIPPET_RIGHT_CHARS = 120
-_CNINFO_STOCK_MAP_URL = "http://www.cninfo.com.cn/new/data/szse_stock.json"
-_CNINFO_DISCLOSURE_QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
-_CNINFO_DISCLOSURE_DETAIL_BASE_URL = "http://www.cninfo.com.cn/new/disclosure/detail"
-_CNINFO_STATIC_BASE_URL = "http://static.cninfo.com.cn/"
+_CNINFO_STOCK_MAP_URL = "https://www.cninfo.com.cn/new/data/szse_stock.json"
+_CNINFO_DISCLOSURE_QUERY_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
+_CNINFO_DISCLOSURE_DETAIL_BASE_URL = "https://www.cninfo.com.cn/new/disclosure/detail"
+_CNINFO_STATIC_BASE_URL = "https://static.cninfo.com.cn/"
 _CNINFO_FULL_YEAR_EXCLUDE_TOKENS = ("摘要", "英文", "取消", "问询", "回复", "更正", "提示性公告")
 _PDF_STRUCTURE_MARKERS = ("%pdf-", "endobj", "stream", "endstream", "xref", "trailer", "/type/", "/catalog")
 _AUTOREAD_OVERVIEW_KEYWORDS = (
@@ -118,6 +126,22 @@ def _build_verified_ssl_context() -> ssl.SSLContext:
     if certifi is not None:
         return ssl.create_default_context(cafile=certifi.where())
     return ssl.create_default_context()
+
+
+def _validate_official_report_url(url: str, *, redirected: bool = False) -> None:
+    """Allow only explicitly supported official disclosure hosts for report fetching."""
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").strip().lower()
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise ValueError("URL must be a valid http(s) address.")
+    if host in _OFFICIAL_DISCLOSURE_HOSTS:
+        return
+    if redirected:
+        raise RuntimeError(
+            "Report URL redirected to a non-whitelisted host. "
+            "Only official disclosure sources are supported."
+        )
+    raise ValueError("URL must use one of the supported official disclosure sources.")
 
 
 def _is_ssl_verify_error(exc: Exception) -> bool:
@@ -386,8 +410,8 @@ def _post_cninfo_disclosure_query(payload: dict[str, str], timeout_sec: int = 12
         "User-Agent": _HTTP_USER_AGENT,
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Origin": "http://www.cninfo.com.cn",
-        "Referer": "http://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search",
+        "Origin": "https://www.cninfo.com.cn",
+        "Referer": "https://www.cninfo.com.cn/new/commonUrl/pageOfSearch?url=disclosure/list/search",
     }
     req = Request(_CNINFO_DISCLOSURE_QUERY_URL, data=data, headers=headers, method="POST")
     with urlopen(req, timeout=timeout_sec) as resp:  # nosec B310 - fixed trusted host for public disclosure data
@@ -531,8 +555,7 @@ def fetch_report_text_from_url(
 ) -> dict[str, Any]:
     """Fetch report page text from URL, with basic safety guards."""
     parsed = urlparse(url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("URL must be a valid http(s) address.")
+    _validate_official_report_url(url)
     path_is_pdf = parsed.path.lower().endswith(".pdf")
 
     pdf_limit_bytes = _parse_mb_env("REPORT_PDF_MAX_MB", default_mb=max(1, pdf_max_bytes // 1_000_000)) * 1_000_000
@@ -543,6 +566,7 @@ def fetch_report_text_from_url(
     try:
         ssl_context = _build_verified_ssl_context()
         with urlopen(req, timeout=timeout_sec, context=ssl_context) as resp:  # nosec B310 - validated scheme and controlled usage
+            _validate_official_report_url(resp.geturl() or url, redirected=True)
             content_type = str(resp.headers.get("Content-Type", "")).lower()
             is_pdf = "application/pdf" in content_type or path_is_pdf
             effective_max = pdf_limit_bytes if is_pdf else html_limit_bytes
@@ -561,6 +585,7 @@ def fetch_report_text_from_url(
             insecure_ssl_used = True
             insecure_context = ssl._create_unverified_context()
             with urlopen(req, timeout=timeout_sec, context=insecure_context) as resp:  # nosec B310
+                _validate_official_report_url(resp.geturl() or url, redirected=True)
                 content_type = str(resp.headers.get("Content-Type", "")).lower()
                 is_pdf = "application/pdf" in content_type or path_is_pdf
                 effective_max = pdf_limit_bytes if is_pdf else html_limit_bytes

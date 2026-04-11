@@ -818,7 +818,7 @@ def _load_us_treasury_tables(current_month: str) -> list[pd.DataFrame]:
     if not tables:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            response = _call_with_resilience(lambda: requests.get(url, timeout=20, verify=False))
+            response = _call_with_resilience(lambda: requests.get(url, timeout=20))
         response.raise_for_status()
         tables = pd.read_html(StringIO(response.text))
     _TREASURY_CURVE_TABLE_CACHE[current_month] = (now, tables)

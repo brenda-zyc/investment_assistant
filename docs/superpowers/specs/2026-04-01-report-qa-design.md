@@ -176,7 +176,7 @@ Add one endpoint in `/Users/brenda/Projects/investment_assistant/app/api/financi
 
 ```json
 {
-  "session_key": "000333|http://static.cninfo.com.cn/.../1225065145.PDF",
+  "report_key": "000333|https://static.cninfo.com.cn/.../1225065145.PDF",
   "mode": "llm_hybrid",
   "short_answer": "今年利润增长主要来自海外收入扩张、ToB 业务增长和成本效率改善。",
   "evidence": [

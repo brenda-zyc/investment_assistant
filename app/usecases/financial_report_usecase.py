@@ -67,21 +67,26 @@ def analyze_financial_report_url(url: str, symbol: str | None = None) -> dict:
     if report_year is None and report_date:
         report_year = int(str(report_date)[:4])
     if report_year is None:
-        # Financial logic: fallback to current year when report-year evidence is unavailable.
-        report_year = dt.date.today().year
-        extracted["warnings"] = [*extracted.get("warnings", []), "Used current year as fallback report_year."]
-    if not report_date:
+        extracted["warnings"] = [
+            *extracted.get("warnings", []),
+            "Report year could not be verified from the document; skipped trend scoring.",
+        ]
+    if report_year is not None and not report_date:
         report_date = f"{report_year}-12-31"
 
-    row = {
-        "report_year": report_year,
-        "report_date": report_date,
-        "revenue": extracted.get("revenue"),
-        "net_profit": extracted.get("net_profit"),
-        "roe": extracted.get("roe"),
-        "debt_ratio": extracted.get("debt_ratio"),
-    }
-    analysis_payload = compute_financial_report_analysis([row])
+    analysis_rows: list[dict] = []
+    if report_year is not None:
+        analysis_rows.append(
+            {
+                "report_year": report_year,
+                "report_date": report_date,
+                "revenue": extracted.get("revenue"),
+                "net_profit": extracted.get("net_profit"),
+                "roe": extracted.get("roe"),
+                "debt_ratio": extracted.get("debt_ratio"),
+            }
+        )
+    analysis_payload = compute_financial_report_analysis(analysis_rows)
 
     if extracted.get("warnings"):
         analysis_payload["highlights"] = [

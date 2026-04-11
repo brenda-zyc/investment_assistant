@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import re
 import sqlite3
-import ssl
 from dataclasses import dataclass
 from functools import reduce
 from pathlib import Path
@@ -12,11 +11,6 @@ from typing import Callable
 
 import akshare as ak
 import pandas as pd
-
-
-# Some AkShare endpoints in this environment require relaxed SSL context.
-ssl._create_default_https_context = ssl._create_unverified_context
-
 
 @dataclass
 class IndicatorSpec:

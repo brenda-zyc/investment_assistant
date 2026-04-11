@@ -166,6 +166,13 @@ def test_auto_read_resets_report_qa_before_fetch() -> None:
     assert body.index(reset_call) < body.index(fetch_call)
 
 
+def test_financial_report_template_uses_report_key_only_for_active_session() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "data.report_key || data.session_key" not in source
+    assert "const reportKey = data.report_key || null;" in source
+
+
 def test_dashboard_template_includes_external_data_reference_section() -> None:
     """Dashboard UI should expose the external-data table and render rows from industry payloads."""
     source = TEMPLATE_PATH.read_text(encoding="utf-8")

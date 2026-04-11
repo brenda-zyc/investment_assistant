@@ -31,7 +31,7 @@ def test_financial_report_qa_forwards_normalized_symbol_and_plain_history(monkey
     def fake_answer_financial_report_question(**kwargs):
         captured.update(kwargs)
         return {
-            "session_key": kwargs["report_key"],
+            "report_key": kwargs["report_key"],
             "mode": "rule_fallback",
             "short_answer": "ok",
             "evidence": [],
@@ -54,7 +54,7 @@ def test_financial_report_qa_forwards_normalized_symbol_and_plain_history(monkey
 
     response = financial_report_api.financial_report_qa(payload)
 
-    assert response["session_key"] == "000333|https://example.com/report.pdf"
+    assert response["report_key"] == "000333|https://example.com/report.pdf"
     assert captured["symbol"] == "000333"
     assert captured["report_key"] == "000333|https://example.com/report.pdf"
     assert captured["question"] == " 今年利润增长主要来自哪里？ "

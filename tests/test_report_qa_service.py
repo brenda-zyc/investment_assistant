@@ -178,7 +178,7 @@ def test_answer_report_question_returns_rule_fallback_without_llm() -> None:
         use_llm=False,
     )
 
-    assert payload["session_key"] == "000333|https://example.com/report.pdf"
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
     assert payload["mode"] == "rule_fallback"
     assert payload["short_answer"]
     assert payload["evidence"]
@@ -267,7 +267,7 @@ def test_answer_report_question_falls_back_to_rule_fallback_when_llm_wrapper_rai
     )
 
     assert payload["mode"] == "rule_fallback"
-    assert payload["session_key"] == "000333|https://example.com/report.pdf"
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
     assert payload["updated_session_summary"]
     assert "prior summary" in payload["updated_session_summary"]
 
@@ -326,7 +326,7 @@ def test_answer_report_question_returns_llm_hybrid_when_llm_wrapper_succeeds(mon
     assert payload["mode"] == "llm_hybrid"
     assert payload["short_answer"] == "llm answer"
     assert payload["citations"]
-    assert payload["session_key"] == "000333|https://example.com/report.pdf"
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
     assert payload["session_reset"] is False
 
 

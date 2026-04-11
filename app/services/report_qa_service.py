@@ -474,7 +474,7 @@ def answer_report_question(
             fallback = _build_follow_up_clarification_answer()
             fallback["updated_session_summary"] = updated_summary
             fallback["session_reset"] = False
-            fallback["session_key"] = report_key
+            fallback["report_key"] = report_key
             return fallback
         llm_question = _rewrite_follow_up_question(question_text, follow_up_anchor)
 
@@ -483,7 +483,7 @@ def answer_report_question(
         fallback = build_rule_fallback_answer_with_scope(llm_question, context, allow_cached_answer=False)
         fallback["updated_session_summary"] = updated_summary
         fallback["session_reset"] = False
-        fallback["session_key"] = report_key
+        fallback["report_key"] = report_key
         return fallback
 
     if use_llm:
@@ -520,7 +520,8 @@ def answer_report_question(
                     normalized_payload["mode"] = "llm_hybrid"
                     normalized_payload["updated_session_summary"] = updated_summary
                     normalized_payload["session_reset"] = False
-                    normalized_payload["session_key"] = report_key
+                    normalized_payload.pop("session_key", None)
+                    normalized_payload["report_key"] = report_key
                     logger.info(
                         "report_qa llm_success symbol=%s report_key=%s question=%s confidence=%s evidence_count=%s citation_count=%s",
                         symbol,
@@ -551,5 +552,5 @@ def answer_report_question(
     fallback = build_rule_fallback_answer_with_scope(llm_question, context, allow_cached_answer=True)
     fallback["updated_session_summary"] = updated_summary
     fallback["session_reset"] = False
-    fallback["session_key"] = report_key
+    fallback["report_key"] = report_key
     return fallback

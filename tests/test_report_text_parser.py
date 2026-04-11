@@ -154,12 +154,16 @@ def test_select_latest_annual_report_prefers_full_report() -> None:
 
 
 class _DummyResponse:
-    def __init__(self, payload: bytes, content_type: str) -> None:
+    def __init__(self, payload: bytes, content_type: str, final_url: str | None = None) -> None:
         self._payload = payload
         self.headers = {"Content-Type": content_type}
+        self._final_url = final_url
 
     def read(self, _size: int = -1) -> bytes:
         return self._payload
+
+    def geturl(self) -> str | None:
+        return self._final_url
 
     def __enter__(self) -> "_DummyResponse":
         return self
@@ -184,7 +188,7 @@ def test_fetch_report_text_from_url_pdf_branch(monkeypatch) -> None:
     monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
     monkeypatch.setattr(report_service, "_extract_pdf_text", fake_extract_pdf_text)
 
-    out = fetch_report_text_from_url("https://example.com/reports/annual-2024.pdf")
+    out = fetch_report_text_from_url("https://static.cninfo.com.cn/reports/annual-2024.pdf")
     assert out["content_type"] == "application/pdf"
     assert out["title"] == "annual-2024.pdf"
     assert out["pdf_pages"] == 88
@@ -243,7 +247,7 @@ def test_fetch_report_text_from_url_ssl_verify_failure_with_hint(monkeypatch) ->
     monkeypatch.delenv("REPORT_URL_INSECURE_SSL", raising=False)
 
     with pytest.raises(RuntimeError) as exc_info:
-        fetch_report_text_from_url("https://example.com/report.pdf")
+        fetch_report_text_from_url("https://static.cninfo.com.cn/report.pdf")
     assert "TLS certificate verification failed" in str(exc_info.value)
 
 
@@ -258,5 +262,50 @@ def test_fetch_report_text_from_url_pdf_size_limit(monkeypatch) -> None:
     monkeypatch.setenv("REPORT_PDF_MAX_MB", "1")
 
     with pytest.raises(RuntimeError) as exc_info:
-        fetch_report_text_from_url("https://example.com/big.pdf")
+        fetch_report_text_from_url("https://static.cninfo.com.cn/big.pdf")
     assert "PDF file is too large to parse" in str(exc_info.value)
+
+
+def test_fetch_report_text_from_url_rejects_non_whitelisted_host() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        fetch_report_text_from_url("https://example.com/report.pdf")
+    assert "official disclosure sources" in str(exc_info.value)
+
+
+def test_fetch_report_text_from_url_rejects_redirect_to_non_whitelisted_host(monkeypatch) -> None:
+    dummy_pdf_bytes = b"%PDF-1.4 FAKE"
+
+    def fake_urlopen(_req, timeout: int = 0, context=None):  # noqa: ANN001
+        assert timeout == 12
+        assert context is not None
+        return _DummyResponse(
+            dummy_pdf_bytes,
+            "application/pdf",
+            final_url="https://example.com/report.pdf",
+        )
+
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        fetch_report_text_from_url("https://static.cninfo.com.cn/report.pdf")
+    assert "redirected to a non-whitelisted host" in str(exc_info.value)
+
+
+def test_post_cninfo_disclosure_query_uses_https_headers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout: int = 0):  # noqa: ANN001
+        captured["url"] = req.full_url
+        captured["origin"] = req.headers.get("Origin")
+        captured["referer"] = req.headers.get("Referer")
+        assert timeout == 12
+        return _DummyResponse(b'{"announcements": []}', "application/json; charset=utf-8")
+
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
+
+    payload = report_service._post_cninfo_disclosure_query({"pageNum": "1"})
+
+    assert payload == {"announcements": []}
+    assert captured["url"] == "https://www.cninfo.com.cn/new/hisAnnouncement/query"
+    assert captured["origin"] == "https://www.cninfo.com.cn"
+    assert str(captured["referer"]).startswith("https://www.cninfo.com.cn/")

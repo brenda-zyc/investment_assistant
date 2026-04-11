@@ -387,6 +387,47 @@ def test_analyze_financial_report_url_returns_none_report_key_when_report_text_i
     assert report_qa_service.get_cached_report_context("000333|https://example.com/report.pdf") is None
 
 
+def test_analyze_financial_report_url_keeps_unknown_report_year_as_missing(monkeypatch) -> None:
+    """URL analysis should not fabricate the current year when report-year evidence is missing."""
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda url: {
+            "url": url,
+            "text": "公告页仅提到营业收入100亿元和净利润10亿元，但没有明确年度。",
+            "content_type": "text/html",
+            "pdf_pages": None,
+            "tls_insecure": False,
+            "title": "某公告页面",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_financial_row_from_report_text",
+        lambda _text, title=None: {
+            "report_year": None,
+            "report_date": None,
+            "revenue": 100000000000.0,
+            "net_profit": 10000000000.0,
+            "roe": None,
+            "debt_ratio": None,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+
+    payload = financial_report_usecase.analyze_financial_report_url("https://example.com/report.html")
+
+    assert payload["analysis"]["latest_report_year"] is None
+    assert payload["analysis"]["score"] is None
+    assert payload["analysis"]["grade"] is None
+    assert any(item["title"] == "No financial data" for item in payload["analysis"]["highlights"])
+    assert payload["extracted"]["report_year"] is None
+
+
 def test_answer_financial_report_question_strips_question_and_delegates(monkeypatch) -> None:
     """The usecase wrapper should validate input and delegate a normalized payload to the service."""
     captured: dict[str, object] = {}
@@ -394,7 +435,7 @@ def test_answer_financial_report_question_strips_question_and_delegates(monkeypa
     def fake_answer_report_question(**kwargs):
         captured.update(kwargs)
         return {
-            "session_key": kwargs["report_key"],
+            "report_key": kwargs["report_key"],
             "mode": "rule_fallback",
             "short_answer": "ok",
             "evidence": [],
@@ -415,7 +456,7 @@ def test_answer_financial_report_question_strips_question_and_delegates(monkeypa
         use_llm=True,
     )
 
-    assert payload["session_key"] == "000333|https://example.com/report.pdf"
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
     assert captured["question"] == "今年利润增长主要来自哪里？"
     assert captured["history"] == [{"role": "user", "content": "旧问题"}]
     assert captured["use_llm"] is True
