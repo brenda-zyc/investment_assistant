@@ -26,7 +26,7 @@ def _function_body(source: str, function_signature: str) -> str:
 def test_auto_read_annual_report_resets_stale_financial_report_sections() -> None:
     """Auto-read should clear previously rendered summary sections before fetching a new symbol."""
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "async function autoReadAnnualReport()")
+    body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetFinancialReportPanel();"
     assert reset_call in body
@@ -39,7 +39,7 @@ def test_auto_read_annual_report_resets_stale_financial_report_sections() -> Non
 def test_auto_read_annual_report_has_empty_state_for_missing_report_source() -> None:
     """Auto-read should explain when no annual-report source metadata is available."""
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "async function autoReadAnnualReport()")
+    body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     assert re.search(r"Report source metadata unavailable", body)
 
@@ -140,15 +140,15 @@ def test_financial_report_template_ignores_enter_during_ime_composition() -> Non
 
 def test_financial_report_url_analysis_sends_symbol_with_report_url() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "async function loadFinancialReportFromUrl()")
+    body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     assert 'const reportSymbol = /^\\d{6}$/.test(reportCodeInput.value.trim()) ? reportCodeInput.value.trim() : null;' in body
-    assert "body: JSON.stringify(reportSymbol ? { url, symbol: reportSymbol } : { url })" in body
+    assert "force_refresh: forceRefresh" in body
 
 
 def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "async function loadFinancialReportFromUrl()")
+    body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
     fetch_call = "const res = await fetch("
@@ -158,7 +158,7 @@ def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
 
 def test_auto_read_resets_report_qa_before_fetch() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "async function autoReadAnnualReport()")
+    body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
     fetch_call = "const res = await fetch("
@@ -171,6 +171,36 @@ def test_financial_report_template_uses_report_key_only_for_active_session() -> 
 
     assert "data.report_key || data.session_key" not in source
     assert "const reportKey = data.report_key || null;" in source
+
+
+def test_stock_and_report_panels_expose_explicit_refresh_controls() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert 'id="refreshSingleStockBtn"' in source
+    assert 'id="refreshWatchlistBtn"' in source
+    assert 'id="refreshReportBtn"' in source
+    assert 'id="forceReReadReportBtn"' in source
+
+
+def test_stock_and_report_requests_include_refresh_flags_when_requested() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    single_body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
+    watchlist_body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
+    report_body = _function_body(source, "async function loadFinancialReport(refresh = false)")
+    autoread_body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
+
+    assert "body: JSON.stringify({ stock_code: code, refresh })" in single_body
+    assert "body: JSON.stringify({ stock_codes: codes, refresh })" in watchlist_body
+    assert "financial-report-analysis?symbol=" in report_body
+    assert "&refresh=${refresh ? \"true\" : \"false\"}" in report_body
+    assert "force_refresh=${forceRefresh ? \"true\" : \"false\"}" in autoread_body
+
+
+def test_report_url_helper_copy_is_limited_to_official_disclosure_links() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "official disclosure links only" in source.lower()
 
 
 def test_dashboard_template_includes_external_data_reference_section() -> None:

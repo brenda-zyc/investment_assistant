@@ -218,9 +218,10 @@ def test_answer_report_question_uses_report_context_when_llm_is_disabled_and_no_
     assert payload["session_reset"] is False
 
 
-def test_answer_report_question_raises_for_missing_cached_context() -> None:
+def test_answer_report_question_raises_for_missing_cached_context(monkeypatch) -> None:
     """Answering without cached report context should fail fast."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(report_qa_service, "fetch_report_artifact", lambda _report_key: None)
 
     try:
         report_qa_service.answer_report_question(
@@ -235,6 +236,45 @@ def test_answer_report_question_raises_for_missing_cached_context() -> None:
         assert "Active report context not found" in str(exc)
     else:  # pragma: no cover - defensive branch for the expected failure path
         raise AssertionError("expected ValueError")
+
+
+def test_answer_report_question_loads_persisted_artifact_when_memory_cache_is_empty(monkeypatch) -> None:
+    """Q&A should reload persisted report context when the in-memory cache is empty."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        report_qa_service,
+        "fetch_report_artifact",
+        lambda report_key: {
+            "report_key": report_key,
+            "symbol": "000333",
+            "document_url": "https://example.com/report.pdf",
+            "detail_url": None,
+            "title": "2025年年度报告",
+            "published_at": None,
+            "content_type": "application/pdf",
+            "pdf_pages": 188,
+            "report_text": "annual report text",
+            "extracted_metrics": {"revenue": 100.0},
+            "answers": [],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-11T15:00:00",
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="000333",
+        report_key="000333|https://example.com/report.pdf",
+        question="收入怎么样？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["report_key"] == "000333|https://example.com/report.pdf"
+    cached = report_qa_service.get_cached_report_context("000333|https://example.com/report.pdf")
+    assert cached is not None
+    assert cached["report"]["title"] == "2025年年度报告"
 
 
 def test_answer_report_question_falls_back_to_rule_fallback_when_llm_wrapper_raises(monkeypatch) -> None:

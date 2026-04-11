@@ -23,6 +23,7 @@ router = APIRouter()
 class FinancialReportUrlRequest(BaseModel):
     url: str
     symbol: str | None = None
+    force_refresh: bool = False
 
 
 class FinancialReportQaTurn(BaseModel):
@@ -51,13 +52,16 @@ class LlmSessionConfigRequest(BaseModel):
 
 
 @router.get("/api/financial-report-analysis")
-def financial_report_analysis(symbol: str = Query(..., description="6-digit A-share code")) -> dict:
+def financial_report_analysis(
+    symbol: str = Query(..., description="6-digit A-share code"),
+    refresh: bool = Query(default=False),
+) -> dict:
     """Return normalized annual financial reports and auto-generated analysis insights."""
     try:
         normalized = normalize_stock_code(symbol)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_financial_report_analysis(normalized)
+    return get_financial_report_analysis(normalized, refresh=refresh)
 
 
 @router.post("/api/financial-report-url-analysis")
@@ -71,7 +75,11 @@ def financial_report_url_analysis(payload: FinancialReportUrlRequest) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        return analyze_financial_report_url(payload.url, symbol=normalized_symbol)
+        return analyze_financial_report_url(
+            payload.url,
+            symbol=normalized_symbol,
+            force_refresh=payload.force_refresh,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -82,7 +90,10 @@ def financial_report_url_analysis(payload: FinancialReportUrlRequest) -> dict:
 
 
 @router.get("/api/financial-report-autoread")
-def financial_report_autoread(symbol: str = Query(..., description="6-digit A-share code")) -> dict:
+def financial_report_autoread(
+    symbol: str = Query(..., description="6-digit A-share code"),
+    force_refresh: bool = Query(default=False),
+) -> dict:
     """Auto-discover and analyze the latest annual report for a stock symbol."""
     try:
         normalized = normalize_stock_code(symbol)
@@ -90,7 +101,7 @@ def financial_report_autoread(symbol: str = Query(..., description="6-digit A-sh
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        return autonomous_financial_report_read(normalized)
+        return autonomous_financial_report_read(normalized, force_refresh=force_refresh)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

@@ -97,35 +97,39 @@ def parse_symbols_input(symbols_text: str) -> list[str]:
     return unique_symbols
 
 
-def _fetch_cached_symbol_data(symbol: str) -> dict:
-    """Fetch and persist symbol history while preserving cached fallback warnings."""
+def _fetch_cached_symbol_data(symbol: str, *, refresh: bool = False) -> dict:
+    """Load cached symbol history first, refreshing upstream only when explicitly requested or empty."""
     warnings: list[str] = []
+    stored_prices = fetch_stock_prices(symbol)
+    stored_financials = fetch_financial_reports(symbol)
 
-    try:
-        price_rows = fetch_price_data(symbol)
-        upsert_stock_prices(symbol, price_rows)
-        stored_prices = fetch_stock_prices(symbol)
-    except Exception as exc:
-        stored_prices = fetch_stock_prices(symbol)
-        if stored_prices:
-            warnings.append(f"Price fetch failed; returned cached data. Reason: {exc}")
-        else:
-            warnings.append(f"Price fetch failed; no cache available. Returned empty price data. Reason: {exc}")
-            stored_prices = []
+    if refresh or not stored_prices:
+        try:
+            price_rows = fetch_price_data(symbol)
+            upsert_stock_prices(symbol, price_rows)
+            stored_prices = fetch_stock_prices(symbol)
+        except Exception as exc:
+            if stored_prices:
+                warnings.append(f"Price fetch failed; returned cached data. Reason: {exc}")
+            else:
+                warnings.append(
+                    f"Price fetch failed; no cache available. Returned empty price data. Reason: {exc}"
+                )
+                stored_prices = []
 
-    try:
-        financial_rows = fetch_financial_summary(symbol)
-        upsert_financial_reports(symbol, financial_rows)
-        stored_financials = fetch_financial_reports(symbol)
-    except Exception as exc:
-        stored_financials = fetch_financial_reports(symbol)
-        if stored_financials:
-            warnings.append(f"Financial fetch failed; returned cached data. Reason: {exc}")
-        else:
-            warnings.append(
-                f"Financial fetch failed; no cache available. Returned empty financial data. Reason: {exc}"
-            )
-            stored_financials = []
+    if refresh or not stored_financials:
+        try:
+            financial_rows = fetch_financial_summary(symbol)
+            upsert_financial_reports(symbol, financial_rows)
+            stored_financials = fetch_financial_reports(symbol)
+        except Exception as exc:
+            if stored_financials:
+                warnings.append(f"Financial fetch failed; returned cached data. Reason: {exc}")
+            else:
+                warnings.append(
+                    f"Financial fetch failed; no cache available. Returned empty financial data. Reason: {exc}"
+                )
+                stored_financials = []
 
     return {
         "price_data": stored_prices,
@@ -134,9 +138,9 @@ def _fetch_cached_symbol_data(symbol: str) -> dict:
     }
 
 
-def _build_watchlist_snapshot(symbol: str) -> dict:
+def _build_watchlist_snapshot(symbol: str, *, refresh: bool = False) -> dict:
     """Build one watchlist row without realtime or stock-name enrichment."""
-    analyzed = _fetch_cached_symbol_data(symbol)
+    analyzed = _fetch_cached_symbol_data(symbol, refresh=refresh)
     latest_price = analyzed["price_data"][0] if analyzed["price_data"] else None
     latest_financial = analyzed["financial_summary"][0] if analyzed["financial_summary"] else None
     # Percentile calculation: latest close ranked against cached close history.
@@ -152,9 +156,9 @@ def _build_watchlist_snapshot(symbol: str) -> dict:
     }
 
 
-def analyze_single_symbol(symbol: str) -> dict:
+def analyze_single_symbol(symbol: str, *, refresh: bool = False) -> dict:
     """Fetch and persist single-symbol data with cache fallback warnings."""
-    analyzed = _fetch_cached_symbol_data(symbol)
+    analyzed = _fetch_cached_symbol_data(symbol, refresh=refresh)
 
     symbol_name: str | None = None
     try:
@@ -182,7 +186,7 @@ def analyze_single_symbol(symbol: str) -> dict:
     }
 
 
-def analyze_multi_symbols(raw_codes: list[str]) -> dict:
+def analyze_multi_symbols(raw_codes: list[str], *, refresh: bool = False) -> dict:
     """Analyze a watchlist and return latest snapshot per symbol."""
     unique_codes = _deduplicate_codes(raw_codes)[:WATCHLIST_MAX_SYMBOLS]
     ordered_results: list[dict | None] = [None] * len(unique_codes)
@@ -201,7 +205,7 @@ def analyze_multi_symbols(raw_codes: list[str]) -> dict:
         max_workers = min(WATCHLIST_MAX_WORKERS, len(indexed_valid_symbols))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
-                executor.submit(_build_watchlist_snapshot, symbol): (index, symbol)
+                executor.submit(_build_watchlist_snapshot, symbol, refresh=refresh): (index, symbol)
                 for index, symbol in indexed_valid_symbols
             }
             for future in as_completed(future_map):

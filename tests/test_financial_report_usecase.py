@@ -7,6 +7,8 @@ from app.usecases import financial_report_usecase
 def test_autonomous_financial_report_read_returns_partial_payload_on_report_failure(monkeypatch) -> None:
     """Usecase should keep a stable payload when report discovery/fetch partially fails."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(
         financial_report_usecase,
@@ -74,6 +76,8 @@ def test_autonomous_financial_report_read_returns_partial_payload_on_report_fail
 def test_autonomous_financial_report_read_returns_insufficient_answers_when_sources_fail(monkeypatch) -> None:
     """Usecase should degrade to explicit insufficient-data answers instead of crashing."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {})
 
@@ -100,6 +104,8 @@ def test_autonomous_financial_report_read_returns_insufficient_answers_when_sour
 def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_config_exist(monkeypatch) -> None:
     """Usecase should attach LLM interpretation when report text exists and a session config is available."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(
         financial_report_usecase,
         "fetch_stock_names",
@@ -184,6 +190,8 @@ def test_autonomous_financial_report_read_uses_llm_when_report_text_and_session_
 def test_autonomous_financial_report_read_falls_back_when_llm_interpretation_fails(monkeypatch) -> None:
     """Usecase should keep rule-based output when the configured LLM call fails."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda symbols: {symbols[0]: "美的集团"})
     monkeypatch.setattr(
         financial_report_usecase,
@@ -248,6 +256,8 @@ def test_autonomous_financial_report_read_falls_back_when_llm_interpretation_fai
 def test_autonomous_financial_report_read_prefers_report_meta_title_for_pdf_extraction(monkeypatch) -> None:
     """Usecase should pass the disclosure title, not the PDF filename, into text extraction heuristics."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
     monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda symbols: {symbols[0]: "美的集团"})
     monkeypatch.setattr(
@@ -302,6 +312,8 @@ def test_autonomous_financial_report_read_prefers_report_meta_title_for_pdf_extr
 def test_analyze_financial_report_url_returns_report_key_and_caches_context(monkeypatch) -> None:
     """URL analysis should expose a report key and store the active report context for follow-up Q&A."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_artifact", lambda _report_key: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(
         financial_report_usecase,
         "fetch_report_text_from_url",
@@ -348,6 +360,8 @@ def test_analyze_financial_report_url_returns_report_key_and_caches_context(monk
 def test_analyze_financial_report_url_returns_none_report_key_when_report_text_is_empty(monkeypatch) -> None:
     """URL analysis should not advertise a report key when no active context was cached."""
     report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_artifact", lambda _report_key: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
     monkeypatch.setattr(
         financial_report_usecase,
         "fetch_report_text_from_url",
@@ -460,3 +474,121 @@ def test_answer_financial_report_question_strips_question_and_delegates(monkeypa
     assert captured["question"] == "今年利润增长主要来自哪里？"
     assert captured["history"] == [{"role": "user", "content": "旧问题"}]
     assert captured["use_llm"] is True
+
+
+def test_get_financial_report_analysis_uses_cache_without_upstream_when_refresh_false(monkeypatch) -> None:
+    """Report-summary analysis should reuse cached rows unless refresh is explicitly requested."""
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_financial_reports",
+        lambda symbol: [
+            {
+                "symbol": symbol,
+                "report_year": 2025,
+                "report_date": "2025-12-31",
+                "revenue": 1.0,
+                "net_profit": 0.2,
+                "roe": 12.0,
+                "debt_ratio": 40.0,
+            }
+        ],
+    )
+
+    def fail_fetch(_symbol: str):
+        raise AssertionError("financial upstream fetch should not run")
+
+    monkeypatch.setattr(financial_report_usecase, "fetch_financial_summary", fail_fetch)
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {})
+
+    payload = financial_report_usecase.get_financial_report_analysis("000333", refresh=False)
+
+    assert payload["symbol"] == "000333"
+    assert payload["series"]
+    assert payload["warnings"] == []
+
+
+def test_financial_report_autoread_reuses_latest_artifact_when_force_refresh_false(monkeypatch) -> None:
+    """Auto-read should reuse the latest persisted artifact unless force refresh is requested."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_latest_report_artifact_for_symbol",
+        lambda symbol: {
+            "report_key": "000333|https://static.cninfo.com.cn/report.pdf",
+            "symbol": symbol,
+            "document_url": "https://static.cninfo.com.cn/report.pdf",
+            "detail_url": "https://www.cninfo.com.cn/detail",
+            "title": "2025年年度报告",
+            "published_at": "2026-03-28 20:00:00",
+            "content_type": "application/pdf",
+            "pdf_pages": 180,
+            "report_text": "cached report text",
+            "extracted_metrics": {"report_date": "2025-12-31", "revenue": 100.0},
+            "answers": [{"id": "profit_authenticity", "summary": "cached"}],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-11T15:00:00",
+        },
+    )
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {})
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_assessment_context", lambda _symbol: {})
+    monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
+
+    def fail_discovery(_symbol: str):
+        raise AssertionError("report discovery should not run")
+
+    monkeypatch.setattr(financial_report_usecase, "find_latest_annual_report", fail_discovery)
+
+    payload = financial_report_usecase.autonomous_financial_report_read("000333", force_refresh=False)
+
+    assert payload["report_key"] == "000333|https://static.cninfo.com.cn/report.pdf"
+    assert payload["answers"][0]["summary"] == "cached"
+    cached_context = report_qa_service.get_cached_report_context(payload["report_key"])
+    assert cached_context is not None
+    assert cached_context["report_text"] == "cached report text"
+
+
+def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refresh_false(monkeypatch) -> None:
+    """URL analysis should return a persisted artifact when the report key already exists."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_artifact",
+        lambda report_key: {
+            "report_key": report_key,
+            "symbol": "000333",
+            "document_url": "https://static.cninfo.com.cn/report.pdf",
+            "detail_url": None,
+            "title": "2025年年度报告",
+            "published_at": None,
+            "content_type": "application/pdf",
+            "pdf_pages": 180,
+            "report_text": "cached report text",
+            "extracted_metrics": {
+                "report_year": 2025,
+                "report_date": "2025-12-31",
+                "revenue": 100.0,
+                "net_profit": 10.0,
+                "roe": 16.0,
+                "debt_ratio": 45.0,
+            },
+            "answers": [],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-11T15:00:00",
+        },
+    )
+
+    def fail_fetch(_url: str):
+        raise AssertionError("report fetch should not run")
+
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_text_from_url", fail_fetch)
+
+    payload = financial_report_usecase.analyze_financial_report_url(
+        "https://static.cninfo.com.cn/report.pdf",
+        symbol="000333",
+        force_refresh=False,
+    )
+
+    assert payload["report_key"] == "000333|https://static.cninfo.com.cn/report.pdf"
+    assert payload["extracted"]["revenue"] == 100.0

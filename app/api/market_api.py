@@ -15,10 +15,12 @@ router = APIRouter()
 
 class AnalyzeRequest(BaseModel):
     stock_code: str
+    refresh: bool = False
 
 
 class MultiAnalyzeRequest(BaseModel):
     stock_codes: list[str]
+    refresh: bool = False
 
 
 @router.post("/api/analyze")
@@ -30,7 +32,7 @@ def analyze(payload: AnalyzeRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        return analyze_single_symbol(symbol)
+        return analyze_single_symbol(symbol, refresh=payload.refresh)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -42,7 +44,7 @@ def analyze_multi(payload: MultiAnalyzeRequest) -> dict:
     if not raw_codes:
         raise HTTPException(status_code=400, detail="stock_codes cannot be empty")
     # API assumption: usecase enforces watchlist cap to keep latency predictable.
-    return analyze_multi_symbols(raw_codes)
+    return analyze_multi_symbols(raw_codes, refresh=payload.refresh)
 
 
 @router.get("/stock_metrics")

@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from typing import Any
 
 from app.core_logic import compute_financial_report_analysis, compute_financial_report_autoread_assessment
-from app.db import fetch_financial_reports, upsert_financial_reports
+from app.db import (
+    fetch_financial_reports,
+    fetch_latest_report_artifact_for_symbol,
+    fetch_report_artifact,
+    upsert_financial_reports,
+    upsert_report_artifact,
+)
 from app.services.financial_report_service import (
     build_autoread_llm_excerpt,
     extract_report_assessment_metrics,
@@ -25,22 +32,23 @@ from app.services.market_data_service import (
 logger = logging.getLogger(__name__)
 
 
-def get_financial_report_analysis(symbol: str) -> dict:
+def get_financial_report_analysis(symbol: str, *, refresh: bool = False) -> dict:
     """Return normalized annual financial reports and auto-generated analysis insights."""
     warnings: list[str] = []
-    try:
-        financial_rows = fetch_financial_summary(symbol)
-        upsert_financial_reports(symbol, financial_rows)
-        stored_financial_rows = fetch_financial_reports(symbol)
-    except Exception as exc:
-        stored_financial_rows = fetch_financial_reports(symbol)
-        if stored_financial_rows:
-            warnings.append(f"Financial fetch failed; returned cached data. Reason: {exc}")
-        else:
-            warnings.append(
-                f"Financial fetch failed; no cache available. Returned empty financial data. Reason: {exc}"
-            )
-            stored_financial_rows = []
+    stored_financial_rows = fetch_financial_reports(symbol)
+    if refresh or not stored_financial_rows:
+        try:
+            financial_rows = fetch_financial_summary(symbol)
+            upsert_financial_reports(symbol, financial_rows)
+            stored_financial_rows = fetch_financial_reports(symbol)
+        except Exception as exc:
+            if stored_financial_rows:
+                warnings.append(f"Financial fetch failed; returned cached data. Reason: {exc}")
+            else:
+                warnings.append(
+                    f"Financial fetch failed; no cache available. Returned empty financial data. Reason: {exc}"
+                )
+                stored_financial_rows = []
 
     symbol_name: str | None = None
     try:
@@ -56,37 +64,25 @@ def get_financial_report_analysis(symbol: str) -> dict:
     return analysis_payload
 
 
-def analyze_financial_report_url(url: str, symbol: str | None = None) -> dict:
+def analyze_financial_report_url(
+    url: str,
+    symbol: str | None = None,
+    *,
+    force_refresh: bool = False,
+) -> dict:
     """Analyze a Chinese financial report link and return extracted metrics."""
+    report_stub = {"document_url": url, "detail_url": None}
+    report_key = build_report_key(symbol, report_stub) if symbol else None
+    if report_key and not force_refresh:
+        artifact_row = fetch_report_artifact(report_key)
+        if artifact_row:
+            _store_hot_report_context_from_artifact(artifact_row)
+            return _restore_url_analysis_payload_from_artifact(artifact_row)
+
     fetched = fetch_report_text_from_url(url)
 
     extracted = extract_financial_row_from_report_text(fetched["text"], title=fetched.get("title"))
-    report_year = extracted.get("report_year")
-    report_date = extracted.get("report_date")
-
-    if report_year is None and report_date:
-        report_year = int(str(report_date)[:4])
-    if report_year is None:
-        extracted["warnings"] = [
-            *extracted.get("warnings", []),
-            "Report year could not be verified from the document; skipped trend scoring.",
-        ]
-    if report_year is not None and not report_date:
-        report_date = f"{report_year}-12-31"
-
-    analysis_rows: list[dict] = []
-    if report_year is not None:
-        analysis_rows.append(
-            {
-                "report_year": report_year,
-                "report_date": report_date,
-                "revenue": extracted.get("revenue"),
-                "net_profit": extracted.get("net_profit"),
-                "roe": extracted.get("roe"),
-                "debt_ratio": extracted.get("debt_ratio"),
-            }
-        )
-    analysis_payload = compute_financial_report_analysis(analysis_rows)
+    analysis_payload = _build_url_analysis_payload(extracted)
 
     if extracted.get("warnings"):
         analysis_payload["highlights"] = [
@@ -108,13 +104,15 @@ def analyze_financial_report_url(url: str, symbol: str | None = None) -> dict:
             *analysis_payload.get("highlights", []),
         ]
 
-    report_key = _cache_active_report_context(
+    report_key = _persist_report_artifact(
         symbol=symbol,
         report={
             "document_url": fetched["url"],
             "detail_url": None,
             "title": fetched.get("title"),
             "content_type": fetched.get("content_type"),
+            "published_at": None,
+            "pdf_pages": fetched.get("pdf_pages"),
         },
         report_text=fetched.get("text"),
         extracted_metrics=extracted,
@@ -193,7 +191,104 @@ def _has_usable_report_metrics(extracted_metrics: dict | None) -> bool:
     return False
 
 
-def _cache_active_report_context(
+def _build_url_analysis_rows(extracted_metrics: dict | None) -> list[dict[str, Any]]:
+    """Convert one extracted report payload into analysis rows when a report year is known."""
+    extracted_metrics = extracted_metrics or {}
+    report_year = extracted_metrics.get("report_year")
+    report_date = extracted_metrics.get("report_date")
+
+    if report_year is None and report_date:
+        report_year = int(str(report_date)[:4])
+    if report_year is None:
+        extracted_metrics["warnings"] = [
+            *extracted_metrics.get("warnings", []),
+            "Report year could not be verified from the document; skipped trend scoring.",
+        ]
+        return []
+    if not report_date:
+        report_date = f"{report_year}-12-31"
+
+    return [
+        {
+            "report_year": report_year,
+            "report_date": report_date,
+            "revenue": extracted_metrics.get("revenue"),
+            "net_profit": extracted_metrics.get("net_profit"),
+            "roe": extracted_metrics.get("roe"),
+            "debt_ratio": extracted_metrics.get("debt_ratio"),
+        }
+    ]
+
+
+def _build_url_analysis_payload(extracted_metrics: dict | None) -> dict:
+    """Build a report-analysis payload from extracted metrics."""
+    analysis_payload = compute_financial_report_analysis(_build_url_analysis_rows(extracted_metrics))
+    return analysis_payload
+
+
+def _report_context_from_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Reconstruct the in-memory Q&A context shape from one persisted artifact row."""
+    return {
+        "symbol": row.get("symbol"),
+        "report": {
+            "title": row.get("title"),
+            "published_at": row.get("published_at"),
+            "detail_url": row.get("detail_url"),
+            "document_url": row.get("document_url"),
+            "content_type": row.get("content_type"),
+            "pdf_pages": row.get("pdf_pages"),
+        },
+        "report_text": row.get("report_text"),
+        "extracted_metrics": row.get("extracted_metrics") or {},
+        "answers": row.get("answers") or [],
+        "llm_analysis": row.get("llm_analysis"),
+    }
+
+
+def _artifact_row(
+    *,
+    symbol: str | None,
+    report: dict | None,
+    report_text: str | None,
+    extracted_metrics: dict | None,
+    answers: list[dict] | None,
+    llm_analysis: dict | None,
+) -> dict[str, Any] | None:
+    """Build one SQLite artifact row from the current report context."""
+    if not symbol or not report_text:
+        return None
+
+    report_key = build_report_key(symbol, report)
+    if not report_key:
+        return None
+
+    return {
+        "report_key": report_key,
+        "symbol": symbol,
+        "document_url": (report or {}).get("document_url"),
+        "detail_url": (report or {}).get("detail_url"),
+        "title": (report or {}).get("title"),
+        "published_at": (report or {}).get("published_at"),
+        "content_type": (report or {}).get("content_type"),
+        "pdf_pages": (report or {}).get("pdf_pages"),
+        "report_text": report_text,
+        "extracted_metrics": extracted_metrics or {},
+        "answers": answers or [],
+        "llm_analysis": llm_analysis,
+        "current_mode": "report_text_extracted" if _has_usable_report_metrics(extracted_metrics) else "historical_fallback",
+        "parsed_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+    }
+
+
+def _store_hot_report_context_from_artifact(row: dict[str, Any]) -> None:
+    """Populate the optional in-memory hot cache from a persisted artifact."""
+    report_key = str(row.get("report_key") or "").strip()
+    if not report_key:
+        return
+    store_report_context(report_key, _report_context_from_artifact_row(row))
+
+
+def _persist_report_artifact(
     *,
     symbol: str | None,
     report: dict | None,
@@ -202,29 +297,81 @@ def _cache_active_report_context(
     answers: list[dict] | None,
     llm_analysis: dict | None,
 ) -> str | None:
-    """Cache the active report context and return its report key when available."""
-    if not symbol or not report_text:
-        return None
-
-    report_key = build_report_key(symbol, report)
-    if not report_key:
-        return None
-
-    store_report_context(
-        report_key,
-        {
-            "symbol": symbol,
-            "report": dict(report or {}),
-            "report_text": report_text,
-            "extracted_metrics": extracted_metrics or {},
-            "answers": answers or [],
-            "llm_analysis": llm_analysis,
-        },
+    """Persist one report artifact and refresh the hot in-memory cache."""
+    row = _artifact_row(
+        symbol=symbol,
+        report=report,
+        report_text=report_text,
+        extracted_metrics=extracted_metrics,
+        answers=answers,
+        llm_analysis=llm_analysis,
     )
+    if not row:
+        return None
+
+    upsert_report_artifact(row)
+    _store_hot_report_context_from_artifact(row)
+    report_key = str(row["report_key"])
     return report_key
 
 
-def autonomous_financial_report_read(symbol: str) -> dict:
+def _restore_url_analysis_payload_from_artifact(row: dict[str, Any]) -> dict:
+    """Rebuild the URL-analysis response from a persisted artifact row."""
+    return {
+        "source_url": row.get("document_url"),
+        "source_title": row.get("title"),
+        "content_type": row.get("content_type"),
+        "pdf_pages": row.get("pdf_pages"),
+        "tls_insecure": None,
+        "report_key": row.get("report_key"),
+        "analysis": _build_url_analysis_payload(row.get("extracted_metrics") or {}),
+        "extracted": row.get("extracted_metrics") or {},
+    }
+
+
+def _restore_autoread_payload_from_artifact(
+    row: dict[str, Any],
+    *,
+    symbol_name: str | None,
+    historical_context: dict[str, list[tuple[str, float]]],
+    warnings: list[str],
+    llm_config: dict[str, Any] | None,
+) -> dict:
+    """Rebuild the autoread response from a persisted artifact row."""
+    stored_metrics = row.get("extracted_metrics") or {}
+    assessment = compute_financial_report_autoread_assessment(stored_metrics, historical_context)
+    stored_answers = row.get("answers") or assessment.get("answers", [])
+    llm_analysis = row.get("llm_analysis")
+    return {
+        "symbol": row.get("symbol"),
+        "symbol_name": symbol_name,
+        "analysis_mode": "rule_based",
+        "current_mode": row.get("current_mode") or "report_text_extracted",
+        "report_key": row.get("report_key"),
+        "llm_enabled": bool(llm_config),
+        "llm_used": llm_analysis is not None,
+        "llm_provider": llm_config.get("provider") if llm_config else None,
+        "llm_model": llm_config.get("model") if llm_config else None,
+        "llm_analysis": llm_analysis,
+        "as_of": _latest_as_of_date(stored_metrics, historical_context),
+        "report": {
+            "title": row.get("title"),
+            "published_at": row.get("published_at"),
+            "detail_url": row.get("detail_url"),
+            "document_url": row.get("document_url"),
+            "content_type": row.get("content_type"),
+            "pdf_pages": row.get("pdf_pages"),
+            "tls_insecure": None,
+        },
+        "extracted_metrics": stored_metrics,
+        "historical_context": historical_context,
+        "answers": stored_answers,
+        "derived_metrics": assessment.get("derived_metrics", {}),
+        "warnings": warnings,
+    }
+
+
+def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False) -> dict:
     """Autonomously locate and analyze the latest annual report for a stock symbol."""
     warnings: list[str] = []
 
@@ -233,6 +380,25 @@ def autonomous_financial_report_read(symbol: str) -> dict:
         symbol_name = fetch_stock_names([symbol]).get(symbol) or None
     except Exception as exc:
         warnings.append(f"Stock name fetch failed. Reason: {exc}")
+
+    historical_context: dict[str, list[tuple[str, float]]] = {}
+    try:
+        historical_context = fetch_report_assessment_context(symbol)
+    except Exception as exc:
+        warnings.append(f"Historical report context fetch failed. Reason: {exc}")
+
+    llm_config = get_effective_llm_config()
+    if not force_refresh:
+        latest_artifact = fetch_latest_report_artifact_for_symbol(symbol)
+        if latest_artifact:
+            _store_hot_report_context_from_artifact(latest_artifact)
+            return _restore_autoread_payload_from_artifact(
+                latest_artifact,
+                symbol_name=symbol_name,
+                historical_context=historical_context,
+                warnings=warnings,
+                llm_config=llm_config,
+            )
 
     report_meta: dict | None = None
     fetched_report: dict | None = None
@@ -254,15 +420,8 @@ def autonomous_financial_report_read(symbol: str) -> dict:
         except Exception as exc:
             warnings.append(f"Annual report fetch or parse failed. Reason: {exc}")
 
-    historical_context: dict[str, list[tuple[str, float]]] = {}
-    try:
-        historical_context = fetch_report_assessment_context(symbol)
-    except Exception as exc:
-        warnings.append(f"Historical report context fetch failed. Reason: {exc}")
-
     assessment = compute_financial_report_autoread_assessment(extracted_metrics, historical_context)
     current_mode = "report_text_extracted" if _has_usable_report_metrics(extracted_metrics) else "historical_fallback"
-    llm_config = get_effective_llm_config()
     llm_used = False
     llm_analysis: dict | None = None
     if fetched_report and fetched_report.get("text") and llm_config:
@@ -303,9 +462,15 @@ def autonomous_financial_report_read(symbol: str) -> dict:
             )
             warnings.append(f"LLM interpretation failed. Reason: {exc}")
     # TODO: Add optional LLM synthesis when a model provider is configured in this repo.
-    report_key = _cache_active_report_context(
+    report_key = _persist_report_artifact(
         symbol=symbol,
-        report=report_meta,
+        report={
+            **(report_meta or {}),
+            "content_type": fetched_report.get("content_type") if fetched_report else None,
+            "pdf_pages": fetched_report.get("pdf_pages") if fetched_report else None,
+        }
+        if report_meta or fetched_report
+        else report_meta,
         report_text=fetched_report.get("text") if fetched_report else None,
         extracted_metrics=extracted_metrics,
         answers=assessment.get("answers", []),

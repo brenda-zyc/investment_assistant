@@ -848,6 +848,7 @@
               <div class="row">
                 <input id="stockCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Stock code" />
                 <button id="analyzeBtn">Run Analysis</button>
+                <button id="refreshSingleStockBtn" type="button">Refresh Data</button>
               </div>
               <div class="muted" id="singleStatus"></div>
               <div class="muted" id="realtimeStatus"></div>
@@ -967,6 +968,7 @@
               <textarea id="watchlistCodes" placeholder="000333, 600519, 601318"></textarea>
               <div class="row">
                 <button id="analyzeWatchlistBtn">Analyze Watchlist</button>
+                <button id="refreshWatchlistBtn" type="button">Refresh Watchlist</button>
               </div>
               <div class="muted" id="watchlistStatus"></div>
               <div class="table-wrap watchlist-wrap">
@@ -1100,13 +1102,15 @@
           <div class="row">
             <input id="reportCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Financial report symbol" />
             <button id="loadReportBtn">Load Financial Report</button>
+            <button id="refreshReportBtn">Refresh Financial Report</button>
             <button id="autoReadReportBtn">Auto Read Annual Report</button>
+            <button id="forceReReadReportBtn">Force Re-read Annual Report</button>
           </div>
           <div class="row" style="margin-top: 8px">
             <input id="reportUrlInput" type="text" placeholder="https://... (财报网页链接)" aria-label="Financial report URL" />
             <button id="analyzeReportUrlBtn">Analyze Report URL</button>
           </div>
-          <div class="tiny-note">支持中文网页链接（HTTP/HTTPS）和 PDF 文本解析。扫描版 PDF 暂不支持 OCR。</div>
+          <div class="tiny-note">Official disclosure links only. 仅支持官方披露链接（HTTP/HTTPS）和 PDF 文本解析；扫描版 PDF 暂不支持 OCR。</div>
           <div class="report-settings-card">
             <h3>LLM Settings</h3>
             <div class="row">
@@ -1216,6 +1220,7 @@
       const reportPanel = document.getElementById("reportPanel");
 
       const analyzeBtn = document.getElementById("analyzeBtn");
+      const refreshSingleStockBtn = document.getElementById("refreshSingleStockBtn");
       const stockCodeInput = document.getElementById("stockCode");
       const singleStatusEl = document.getElementById("singleStatus");
       const realtimeStatusEl = document.getElementById("realtimeStatus");
@@ -1232,6 +1237,7 @@
 
       const watchlistCodes = document.getElementById("watchlistCodes");
       const analyzeWatchlistBtn = document.getElementById("analyzeWatchlistBtn");
+      const refreshWatchlistBtn = document.getElementById("refreshWatchlistBtn");
       const watchlistStatusEl = document.getElementById("watchlistStatus");
       const watchlistTableBody = document.querySelector("#watchlistTable tbody");
 
@@ -1255,7 +1261,9 @@
       const industryTableBody = document.querySelector("#industryTable tbody");
       const reportCodeInput = document.getElementById("reportCode");
       const loadReportBtn = document.getElementById("loadReportBtn");
+      const refreshReportBtn = document.getElementById("refreshReportBtn");
       const autoReadReportBtn = document.getElementById("autoReadReportBtn");
+      const forceReReadReportBtn = document.getElementById("forceReReadReportBtn");
       const reportUrlInput = document.getElementById("reportUrlInput");
       const analyzeReportUrlBtn = document.getElementById("analyzeReportUrlBtn");
       const llmProviderInput = document.getElementById("llmProviderInput");
@@ -2024,7 +2032,7 @@
         });
       }
 
-      async function analyzeSingleStock() {
+      async function analyzeSingleStock(refresh = false) {
         const code = stockCodeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
           singleStatusEl.textContent = "Please input a valid 6-digit stock code.";
@@ -2032,14 +2040,17 @@
         }
 
         analyzeBtn.disabled = true;
-        singleStatusEl.textContent = "Analyzing and updating dashboard...";
+        refreshSingleStockBtn.disabled = true;
+        singleStatusEl.textContent = refresh
+          ? "Refreshing upstream stock data..."
+          : "Loading cached stock snapshot...";
 
         try {
           const [res, metricRes] = await Promise.all([
             fetch(`${apiBase}/api/analyze`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ stock_code: code }),
+              body: JSON.stringify({ stock_code: code, refresh }),
             }),
             fetch(`${apiBase}/stock_metrics?symbol=${encodeURIComponent(code)}`),
           ]);
@@ -2075,7 +2086,9 @@
           const warningText = (data.warnings || []).length
             ? ` Warnings: ${(data.warnings || []).join(" | ")}`
             : "";
-          singleStatusEl.textContent = `Loaded ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
+          singleStatusEl.textContent = `${
+            refresh ? "Refreshed" : "Loaded cached snapshot for"
+          } ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
         } catch (err) {
           if (isBackendUnreachable(err)) {
             singleStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
@@ -2095,6 +2108,7 @@
           resetMetrics();
         } finally {
           analyzeBtn.disabled = false;
+          refreshSingleStockBtn.disabled = false;
         }
       }
 
@@ -2230,7 +2244,7 @@
         }
       }
 
-      async function analyzeWatchlist() {
+      async function analyzeWatchlist(refresh = false) {
         const codes = parseWatchlistInput(watchlistCodes.value);
         if (!codes.length) {
           watchlistStatusEl.textContent = "Please input at least one stock code.";
@@ -2238,7 +2252,10 @@
         }
 
         analyzeWatchlistBtn.disabled = true;
-        watchlistStatusEl.textContent = `Analyzing ${codes.length} symbols...`;
+        refreshWatchlistBtn.disabled = true;
+        watchlistStatusEl.textContent = refresh
+          ? `Refreshing ${codes.length} symbols...`
+          : `Loading cached watchlist for ${codes.length} symbols...`;
         watchlistTableBody.innerHTML = "";
         watchlistSymbols = [];
 
@@ -2246,7 +2263,7 @@
           const res = await fetch(`${apiBase}/api/analyze-multi`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ stock_codes: codes }),
+            body: JSON.stringify({ stock_codes: codes, refresh }),
           });
           const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
@@ -2254,7 +2271,9 @@
           const rows = data.results || [];
           renderWatchlistRows(rows);
           const okCount = rows.filter((x) => !x.error).length;
-          watchlistStatusEl.textContent = `Loaded watchlist. ${okCount}/${rows.length} symbols succeeded.`;
+          watchlistStatusEl.textContent = `${
+            refresh ? "Refreshed" : "Loaded cached watchlist."
+          } ${okCount}/${rows.length} symbols succeeded.`;
         } catch (err) {
           watchlistTableBody.innerHTML = "";
           if (isBackendUnreachable(err)) {
@@ -2264,10 +2283,11 @@
           }
         } finally {
           analyzeWatchlistBtn.disabled = false;
+          refreshWatchlistBtn.disabled = false;
         }
       }
 
-      async function loadFinancialReport() {
+      async function loadFinancialReport(refresh = false) {
         const code = reportCodeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
           reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
@@ -2275,16 +2295,21 @@
         }
 
         loadReportBtn.disabled = true;
+        refreshReportBtn.disabled = true;
         resetFinancialReportPanel();
         resetReportQaSession({
           symbol: code,
           reportKey: null,
           label: "Load or auto-read an annual report before asking questions.",
         });
-        reportStatusEl.textContent = "Loading financial reports...";
+        reportStatusEl.textContent = refresh
+          ? "Refreshing financial report summary..."
+          : "Loading cached financial report summary...";
 
         try {
-          const res = await fetch(`${apiBase}/api/financial-report-analysis?symbol=${encodeURIComponent(code)}`);
+          const res = await fetch(
+            `${apiBase}/api/financial-report-analysis?symbol=${encodeURIComponent(code)}&refresh=${refresh ? "true" : "false"}`
+          );
           const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
@@ -2296,7 +2321,9 @@
 
           const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
           const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
-          reportStatusEl.textContent = `Loaded ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
+          reportStatusEl.textContent = `${
+            refresh ? "Refreshed" : "Loaded cached summary for"
+          } ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
         } catch (err) {
           resetFinancialReportPanel();
           if (isBackendUnreachable(err)) {
@@ -2306,10 +2333,11 @@
           }
         } finally {
           loadReportBtn.disabled = false;
+          refreshReportBtn.disabled = false;
         }
       }
 
-      async function loadFinancialReportFromUrl() {
+      async function loadFinancialReportFromUrl(forceRefresh = false) {
         const url = reportUrlInput.value.trim();
         if (!/^https?:\/\//i.test(url)) {
           reportStatusEl.textContent = "Please input a valid http(s) report URL.";
@@ -2324,13 +2352,19 @@
           reportKey: null,
           label: "Load or auto-read an annual report before asking questions.",
         });
-        reportStatusEl.textContent = "Fetching and parsing report URL...";
+        reportStatusEl.textContent = forceRefresh
+          ? "Re-fetching and parsing official disclosure report URL..."
+          : "Fetching and parsing official disclosure report URL...";
 
         try {
           const res = await fetch(`${apiBase}/api/financial-report-url-analysis`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(reportSymbol ? { url, symbol: reportSymbol } : { url }),
+            body: JSON.stringify(
+              reportSymbol
+                ? { url, symbol: reportSymbol, force_refresh: forceRefresh }
+                : { url, force_refresh: forceRefresh }
+            ),
           });
           const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
@@ -2371,7 +2405,7 @@
         }
       }
 
-      async function autoReadAnnualReport() {
+      async function autoReadAnnualReport(forceRefresh = false) {
         const code = reportCodeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
           reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
@@ -2379,16 +2413,21 @@
         }
 
         autoReadReportBtn.disabled = true;
+        forceReReadReportBtn.disabled = true;
         resetFinancialReportPanel();
         resetReportQaSession({
           symbol: code,
           reportKey: null,
           label: "Load or auto-read an annual report before asking questions.",
         });
-        reportStatusEl.textContent = "Locating and reading the latest annual report...";
+        reportStatusEl.textContent = forceRefresh
+          ? "Force re-reading the latest annual report..."
+          : "Loading persisted or latest annual report...";
 
         try {
-          const res = await fetch(`${apiBase}/api/financial-report-autoread?symbol=${encodeURIComponent(code)}`);
+          const res = await fetch(
+            `${apiBase}/api/financial-report-autoread?symbol=${encodeURIComponent(code)}&force_refresh=${forceRefresh ? "true" : "false"}`
+          );
           const data = await parseJsonResponse(res, "Financial report auto-read endpoint");
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
@@ -2432,7 +2471,9 @@
 
           const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
           const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
-          reportStatusEl.textContent = `Auto-read completed for ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
+          reportStatusEl.textContent = `${
+            forceRefresh ? "Force re-read completed for" : "Auto-read completed for"
+          } ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
         } catch (err) {
           if (isBackendUnreachable(err)) {
             reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
@@ -2441,6 +2482,7 @@
           }
         } finally {
           autoReadReportBtn.disabled = false;
+          forceReReadReportBtn.disabled = false;
         }
       }
 
@@ -2819,9 +2861,10 @@
         }
       }
 
-      analyzeBtn.addEventListener("click", analyzeSingleStock);
+      analyzeBtn.addEventListener("click", () => analyzeSingleStock(false));
+      refreshSingleStockBtn.addEventListener("click", () => analyzeSingleStock(true));
       stockCodeInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") analyzeSingleStock();
+        if (e.key === "Enter") analyzeSingleStock(false);
       });
       priceLimitSelect.addEventListener("change", () => renderPriceRows(currentPriceRows));
       document.querySelectorAll("[data-accordion-toggle]").forEach((buttonEl) => {
@@ -2837,7 +2880,8 @@
         });
       });
 
-      analyzeWatchlistBtn.addEventListener("click", analyzeWatchlist);
+      analyzeWatchlistBtn.addEventListener("click", () => analyzeWatchlist(false));
+      refreshWatchlistBtn.addEventListener("click", () => analyzeWatchlist(true));
 
       loadMacroBtn.addEventListener("click", loadMacroIndicators);
       macroTableSelect.addEventListener("change", loadMacroIndicators);
@@ -2848,8 +2892,10 @@
       });
       loadIndustryBtn.addEventListener("click", loadIndustryCycles);
       refreshExternalDataBtn.addEventListener("click", refreshExternalDataReferences);
-      loadReportBtn.addEventListener("click", loadFinancialReport);
-      autoReadReportBtn.addEventListener("click", autoReadAnnualReport);
+      loadReportBtn.addEventListener("click", () => loadFinancialReport(false));
+      refreshReportBtn.addEventListener("click", () => loadFinancialReport(true));
+      autoReadReportBtn.addEventListener("click", () => autoReadAnnualReport(false));
+      forceReReadReportBtn.addEventListener("click", () => autoReadAnnualReport(true));
       saveLlmSessionBtn.addEventListener("click", saveLlmSessionConfig);
       testLlmConnectionBtn.addEventListener("click", testLlmConnection);
       [llmProviderInput, llmBaseUrlInput, llmModelInput, llmApiKeyInput].forEach((inputEl) => {
@@ -2865,11 +2911,11 @@
         renderReportQaTranscript();
       });
       reportCodeInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") loadFinancialReport();
+        if (e.key === "Enter") loadFinancialReport(false);
       });
-      analyzeReportUrlBtn.addEventListener("click", loadFinancialReportFromUrl);
+      analyzeReportUrlBtn.addEventListener("click", () => loadFinancialReportFromUrl(false));
       reportUrlInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") loadFinancialReportFromUrl();
+        if (e.key === "Enter") loadFinancialReportFromUrl(false);
       });
 
       resetMetrics();
