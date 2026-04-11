@@ -937,3 +937,59 @@ def test_external_data_is_stale_uses_weekly_window() -> None:
 
     assert industry_usecase.external_data_is_stale([{"trade_date": fresh_date}]) is False
     assert industry_usecase.external_data_is_stale([{"trade_date": stale_date}]) is True
+
+def test_industry_indicator_specs_split_pork_sources() -> None:
+    specs = industry.get_industry_indicator_specs()
+    keys = {item["indicator_key"] for item in specs}
+
+    assert "pork_wholesale_price_moa" in keys
+    assert "live_hog_spot_price_soozhu" in keys
+    assert "pork_price" not in keys
+
+    moa_spec = next(item for item in specs if item["indicator_key"] == "pork_wholesale_price_moa")
+    soozhu_spec = next(item for item in specs if item["indicator_key"] == "live_hog_spot_price_soozhu")
+
+    assert moa_spec["special_source"] == "moa_pork"
+    assert soozhu_spec["special_source"] == "soozhu_pork"
+    assert "sina_contract" not in moa_spec
+    assert "basis_var" not in moa_spec
+    assert "sina_contract" not in soozhu_spec
+    assert "basis_var" not in soozhu_spec
+
+
+def test_fetch_single_industry_series_routes_split_pork_sources(monkeypatch) -> None:
+    moa_spec = {
+        "indicator_key": "pork_wholesale_price_moa",
+        "special_source": "moa_pork",
+    }
+    soozhu_spec = {
+        "indicator_key": "live_hog_spot_price_soozhu",
+        "special_source": "soozhu_pork",
+    }
+
+    monkeypatch.setattr(
+        industry,
+        "_fetch_moa_pork_series",
+        lambda start_date=None, end_date=None, max_pages=1, max_articles=12: [("2026-04-10", 28.5)],
+    )
+    monkeypatch.setattr(
+        industry,
+        "_fetch_pork_spot_series",
+        lambda: [("2026-04-10", 8.8)],
+    )
+
+    moa_points, moa_source = industry._fetch_single_industry_series(
+        moa_spec,
+        start_date="20260401",
+        end_date="20260410",
+    )
+    soozhu_points, soozhu_source = industry._fetch_single_industry_series(
+        soozhu_spec,
+        start_date="20260401",
+        end_date="20260410",
+    )
+
+    assert moa_points == [("2026-04-10", 28.5)]
+    assert moa_source == "moa_market_info"
+    assert soozhu_points == [("2026-04-10", 8.8)]
+    assert soozhu_source == "spot_hog_lean_price_soozhu"

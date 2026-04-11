@@ -112,12 +112,21 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
     },
     {
         "industry": "Agriculture",
-        "indicator_key": "pork_price",
-        "indicator": "pork_price",
-        "display_name": "生猪价格",
+        "indicator_key": "pork_wholesale_price_moa",
+        "indicator": "pork_wholesale_price_moa",
+        "display_name": "猪肉平均批发价（农业农村部）",
+        "special_source": "moa_pork",
+        "source_name": "农业农村部",
+        "source_url": "https://www.moa.gov.cn/xw/zxfb/",
+    },
+    {
+        "industry": "Agriculture",
+        "indicator_key": "live_hog_spot_price_soozhu",
+        "indicator": "live_hog_spot_price_soozhu",
+        "display_name": "生猪价格（搜猪网）",
         "special_source": "soozhu_pork",
-        "sina_contract": "LH0",
-        "basis_var": "LH",
+        "source_name": "搜猪网",
+        "source_url": "https://www.soozhu.com/",
     },
     {
         "industry": "Agriculture",
@@ -367,6 +376,8 @@ def _expected_hosts_for_spec(spec: dict[str, str]) -> list[str]:
         hosts.update(_resolve_source_hosts("spot_hog_lean_price_soozhu"))
     if special_source == "soozhu_corn":
         hosts.update(_resolve_source_hosts("spot_corn_price_soozhu"))
+    if special_source == "moa_pork":
+        hosts.update(_resolve_source_hosts("moa_market_info"))
     if special_source == "moa_beef":
         hosts.update(_resolve_source_hosts("moa_market_info"))
     if str(spec.get("sina_contract") or "").strip():
@@ -604,28 +615,36 @@ def _extract_moa_article_date(article_url: str) -> str | None:
     return f"{url_match.group(1)}-{url_match.group(2)}-{url_match.group(3)}"
 
 
-def _fetch_moa_beef_series(
+def _build_moa_wholesale_price_patterns(product_label: str) -> list[str]:
+    """Return regular expressions for MOA wholesale price articles for one product."""
+    label = re.escape(product_label)
+    return [
+        rf"{label}(?:平均)?(?:批发)?价格为?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+        rf"{label}(?:平均)?(?:批发)?价格为?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        rf"{label}(?:平均)?(?:批发)?价格每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+        rf"{label}(?:平均)?(?:批发)?价格\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        rf"{label}(?:平均)?(?:批发)?(?:价格)?(?:为)?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
+        rf"{label}(?:平均)?(?:批发)?(?:价格)?(?:为)?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
+    ]
+
+
+def _fetch_moa_wholesale_series(
+    product_label: str,
+    logger_key: str,
     start_date: str | None = None,
     end_date: str | None = None,
     max_pages: int = 8,
     max_articles: int = 40,
 ) -> list[tuple[str, float]]:
-    """Fetch beef wholesale price points from MOA market-info article pages."""
+    """Fetch MOA wholesale price points from public market-info article pages."""
     listing_roots = [
         "https://scs.moa.gov.cn/scxxfb/",
         "https://www.moa.gov.cn/xw/zxfb/",
     ]
     article_candidates: list[tuple[int, str]] = []
     seen_urls: set[str] = set()
-    price_patterns = [
-        r"牛肉(?:平均)?(?:批发)?价格为?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
-        r"牛肉(?:平均)?(?:批发)?价格为?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
-        r"牛肉(?:平均)?(?:批发)?价格每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
-        r"牛肉(?:平均)?(?:批发)?价格\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
-        r"牛肉(?:平均)?(?:批发)?(?:价格)?(?:为)?\s*([0-9]+(?:\.[0-9]+)?)\s*元/公斤",
-        r"牛肉(?:平均)?(?:批发)?(?:价格)?(?:为)?每公斤\s*([0-9]+(?:\.[0-9]+)?)\s*元",
-    ]
-    title_hints = ("牛肉", "市场动态", "市场信息", "农产品", "批发价格")
+    price_patterns = _build_moa_wholesale_price_patterns(product_label)
+    title_hints = (product_label, "市场动态", "市场信息", "农产品", "批发价格")
 
     def _load_html(url: str) -> str:
         response = requests.get(url, timeout=10)
@@ -642,7 +661,7 @@ def _fetch_moa_beef_series(
             try:
                 listing_html = _call_with_resilience(lambda url=listing_url: _load_html(url))
             except Exception as exc:
-                logger.warning("industry_cycles moa_beef listing_failed url=%s err=%s", listing_url, exc)
+                logger.warning("industry_cycles %s listing_failed url=%s err=%s", logger_key, listing_url, exc)
                 continue
             if not listing_html:
                 continue
@@ -675,7 +694,7 @@ def _fetch_moa_beef_series(
         try:
             article_html = _call_with_resilience(lambda url=article_url: _load_html(url))
         except Exception as exc:
-            logger.warning("industry_cycles moa_beef article_failed url=%s err=%s", article_url, exc)
+            logger.warning("industry_cycles %s article_failed url=%s err=%s", logger_key, article_url, exc)
             continue
         if not article_html:
             continue
@@ -713,6 +732,40 @@ def _fetch_moa_beef_series(
         points.append((trade_date, value))
 
     return _dedupe_points(points)
+
+
+def _fetch_moa_beef_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    max_pages: int = 8,
+    max_articles: int = 40,
+) -> list[tuple[str, float]]:
+    """Fetch beef wholesale price points from MOA market-info article pages."""
+    return _fetch_moa_wholesale_series(
+        "牛肉",
+        "moa_beef",
+        start_date=start_date,
+        end_date=end_date,
+        max_pages=max_pages,
+        max_articles=max_articles,
+    )
+
+
+def _fetch_moa_pork_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    max_pages: int = 8,
+    max_articles: int = 40,
+) -> list[tuple[str, float]]:
+    """Fetch pork wholesale price points from MOA market-info article pages."""
+    return _fetch_moa_wholesale_series(
+        "猪肉",
+        "moa_pork",
+        start_date=start_date,
+        end_date=end_date,
+        max_pages=max_pages,
+        max_articles=max_articles,
+    )
 
 
 def _fetch_forex_hist_series(symbol: str, start_date: str, end_date: str) -> list[tuple[str, float]]:
@@ -851,6 +904,15 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
         points = _fetch_corn_spot_series()
         if points:
             return points, "spot_corn_price_soozhu"
+    if special_source == "moa_pork":
+        points = _fetch_moa_pork_series(
+            start_date=start_date,
+            end_date=end_date,
+            max_pages=1,
+            max_articles=12,
+        )
+        if points:
+            return points, "moa_market_info"
     if special_source == "moa_beef":
         points = _fetch_moa_beef_series(
             start_date=start_date,

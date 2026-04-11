@@ -125,8 +125,10 @@ def _industry_allowed_source_prefixes(spec: dict[str, str]) -> set[str]:
         prefixes.add("cempi_index")
     elif special_source == "construction_index":
         prefixes.add("macro_china_construction_price_index")
+    elif special_source == "moa_pork":
+        prefixes.add("moa_market_info")
     elif special_source == "soozhu_pork":
-        prefixes.update({"moa_market_info", "spot_hog_lean_price_soozhu"})
+        prefixes.add("spot_hog_lean_price_soozhu")
     elif special_source == "soozhu_corn":
         prefixes.add("spot_corn_price_soozhu")
     elif special_source == "moa_beef":

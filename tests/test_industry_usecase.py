@@ -606,3 +606,97 @@ def test_refresh_external_data_cache_stops_retrying_fetch_failed_indicator(monke
         (window_90, ("gold_td",)),
     ]
     assert diagnostics["indicator_status"]["eur_cnh"]["status"] == "fetch_failed"
+
+
+def test_build_industry_cycles_payload_exposes_split_pork_indicators() -> None:
+    rows = [
+        {
+            "industry": "Agriculture",
+            "indicator": "pork_wholesale_price_moa",
+            "trade_date": "2026-04-10",
+            "value": 28.5,
+            "source": "moa_market_info",
+        },
+        {
+            "industry": "Agriculture",
+            "indicator": "live_hog_spot_price_soozhu",
+            "trade_date": "2026-04-10",
+            "value": 8.8,
+            "source": "spot_hog_lean_price_soozhu",
+        },
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    wholesale_row = next(row for row in payload["rows"] if row["indicator_key"] == "pork_wholesale_price_moa")
+    live_hog_row = next(row for row in payload["rows"] if row["indicator_key"] == "live_hog_spot_price_soozhu")
+
+    assert wholesale_row["display_name"] == "猪肉平均批发价（农业农村部）"
+    assert wholesale_row["source"] == "农业农村部"
+    assert live_hog_row["display_name"] == "生猪价格（搜猪网）"
+    assert live_hog_row["source"] == "搜猪网"
+
+
+def test_build_industry_cycles_payload_ignores_mismatched_split_pork_sources(monkeypatch) -> None:
+    monkeypatch.setattr(
+        industry_usecase,
+        "get_industry_indicator_specs",
+        lambda: [
+            {
+                "industry": "Agriculture",
+                "indicator_key": "pork_wholesale_price_moa",
+                "indicator": "pork_wholesale_price_moa",
+                "display_name": "猪肉平均批发价（农业农村部）",
+                "special_source": "moa_pork",
+                "source_name": "农业农村部",
+                "source_url": "https://www.moa.gov.cn/xw/zxfb/",
+            },
+            {
+                "industry": "Agriculture",
+                "indicator_key": "live_hog_spot_price_soozhu",
+                "indicator": "live_hog_spot_price_soozhu",
+                "display_name": "生猪价格（搜猪网）",
+                "special_source": "soozhu_pork",
+                "source_name": "搜猪网",
+                "source_url": "https://www.soozhu.com/",
+            },
+        ],
+    )
+    rows = [
+        {
+            "industry": "Agriculture",
+            "indicator": "pork_wholesale_price_moa",
+            "trade_date": "2026-04-11",
+            "value": 99.9,
+            "source": "spot_hog_lean_price_soozhu",
+        },
+        {
+            "industry": "Agriculture",
+            "indicator": "pork_wholesale_price_moa",
+            "trade_date": "2026-04-10",
+            "value": 28.5,
+            "source": "moa_market_info",
+        },
+        {
+            "industry": "Agriculture",
+            "indicator": "live_hog_spot_price_soozhu",
+            "trade_date": "2026-04-11",
+            "value": 88.8,
+            "source": "moa_market_info",
+        },
+        {
+            "industry": "Agriculture",
+            "indicator": "live_hog_spot_price_soozhu",
+            "trade_date": "2026-04-10",
+            "value": 8.8,
+            "source": "spot_hog_lean_price_soozhu",
+        },
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    wholesale_row = next(row for row in payload["rows"] if row["indicator_key"] == "pork_wholesale_price_moa")
+    live_hog_row = next(row for row in payload["rows"] if row["indicator_key"] == "live_hog_spot_price_soozhu")
+
+    assert wholesale_row["value"] == 28.5
+    assert wholesale_row["source"] == "农业农村部"
+    assert live_hog_row["value"] == 8.8
+    assert live_hog_row["source"] == "搜猪网"

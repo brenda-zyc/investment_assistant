@@ -8,6 +8,57 @@ SQLITE_TIMEOUT_SECONDS = 5.0
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
+def _create_industry_prices_table(cur: sqlite3.Cursor) -> None:
+    """Create the source-aware industry price cache table."""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS industry_prices (
+            industry TEXT NOT NULL,
+            indicator TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            value REAL,
+            source TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (indicator, trade_date, source)
+        )
+        """
+    )
+
+
+def _ensure_industry_prices_schema(cur: sqlite3.Cursor) -> None:
+    """Migrate legacy industry price caches to the source-aware primary key."""
+    cur.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'industry_prices'
+        """
+    )
+    if cur.fetchone() is None:
+        _create_industry_prices_table(cur)
+        return
+
+    cur.execute("PRAGMA table_info('industry_prices')")
+    table_info = cur.fetchall()
+    pk_columns = [
+        row[1]
+        for row in sorted(table_info, key=lambda item: item[5])
+        if int(row[5]) > 0
+    ]
+    if pk_columns == ["indicator", "trade_date", "source"]:
+        return
+
+    cur.execute("ALTER TABLE industry_prices RENAME TO industry_prices_legacy")
+    _create_industry_prices_table(cur)
+    cur.execute(
+        """
+        INSERT INTO industry_prices (industry, indicator, trade_date, value, source)
+        SELECT industry, indicator, trade_date, value, COALESCE(source, '')
+        FROM industry_prices_legacy
+        """
+    )
+    cur.execute("DROP TABLE industry_prices_legacy")
+
+
 def _validate_table_name(table_name: str) -> None:
     """Validate dynamic table name to prevent unsafe SQL interpolation."""
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
@@ -59,18 +110,7 @@ def init_db() -> None:
         """
     )
 
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS industry_prices (
-            industry TEXT NOT NULL,
-            indicator TEXT NOT NULL,
-            trade_date TEXT NOT NULL,
-            value REAL,
-            source TEXT,
-            PRIMARY KEY (indicator, trade_date)
-        )
-        """
-    )
+    _ensure_industry_prices_schema(cur)
 
     cur.execute(
         """
@@ -263,10 +303,9 @@ def upsert_industry_prices(rows: list[dict[str, Any]]) -> None:
         """
         INSERT INTO industry_prices (industry, indicator, trade_date, value, source)
         VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(indicator, trade_date) DO UPDATE SET
+        ON CONFLICT(indicator, trade_date, source) DO UPDATE SET
             industry=excluded.industry,
-            value=excluded.value,
-            source=excluded.source
+            value=excluded.value
         """,
         [
             (
