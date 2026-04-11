@@ -38,6 +38,8 @@ _SOURCE_HOSTS: dict[str, list[str]] = {
     "index_global_hist_em": ["push2his.eastmoney.com"],
     "us_treasury_curve": ["home.treasury.gov"],
     "zhaomei_water_coal": ["m.zhaomei.com"],
+    "sxcoal_cci5500": ["www.sxcoal.com"],
+    "cempi_index": ["index.ccement.com"],
 }
 
 INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
@@ -45,21 +47,25 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Energy",
         "indicator_key": "brent_oil",
         "indicator": "brent_oil",
+        "display_name": "布伦特原油价格",
         "global_symbols": "B00Y,CL00Y",
         "sina_contract": "SC0",
         "basis_var": "SC",
     },
     {
         "industry": "Energy",
-        "indicator_key": "thermal_coal",
-        "indicator": "thermal_coal",
-        "sina_contract": "ZC0",
-        "basis_var": "ZC",
+        "indicator_key": "thermal_coal_index",
+        "indicator": "thermal_coal_index",
+        "display_name": "动力煤价格指数（CCI5500）",
+        "special_source": "sxcoal_cci5500",
+        "source_name": "Sxcoal",
+        "source_url": "https://www.sxcoal.com/",
     },
     {
         "industry": "New Energy & Metals",
         "indicator_key": "lithium_carbonate",
         "indicator": "lithium_carbonate",
+        "display_name": "碳酸锂价格",
         "sina_contract": "LC0",
         "basis_var": "LC",
     },
@@ -67,6 +73,7 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "New Energy & Metals",
         "indicator_key": "copper_price",
         "indicator": "copper_price",
+        "display_name": "铜价",
         "sina_contract": "CU0",
         "basis_var": "CU",
     },
@@ -74,6 +81,7 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Steel & Construction",
         "indicator_key": "rebar_price",
         "indicator": "rebar_price",
+        "display_name": "螺纹钢价格",
         "sina_contract": "RB0",
         "basis_var": "RB",
     },
@@ -81,20 +89,24 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Steel & Construction",
         "indicator_key": "iron_ore_price",
         "indicator": "iron_ore_price",
+        "display_name": "铁矿石价格",
         "sina_contract": "I0",
         "basis_var": "I",
     },
     {
         "industry": "Steel & Construction",
-        "indicator_key": "cement_price",
-        "indicator": "cement_price",
-        "special_source": "construction_index",
-        "basis_var": "ZC",
+        "indicator_key": "cement_price_index",
+        "indicator": "cement_price_index",
+        "display_name": "水泥价格指数（CEMPI）",
+        "special_source": "cempi_index",
+        "source_name": "水泥网",
+        "source_url": "https://index.ccement.com/",
     },
     {
         "industry": "Solar",
         "indicator_key": "silicon_wafer_price",
         "indicator": "silicon_wafer_price",
+        "display_name": "硅片价格",
         "sina_contract": "SI0",
         "basis_var": "SI",
     },
@@ -102,6 +114,7 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Agriculture",
         "indicator_key": "pork_price",
         "indicator": "pork_price",
+        "display_name": "生猪价格",
         "special_source": "soozhu_pork",
         "sina_contract": "LH0",
         "basis_var": "LH",
@@ -110,6 +123,7 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Agriculture",
         "indicator_key": "corn_price",
         "indicator": "corn_price",
+        "display_name": "玉米价格",
         "special_source": "soozhu_corn",
         "sina_contract": "C0",
         "basis_var": "C",
@@ -118,12 +132,14 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Agriculture",
         "indicator_key": "beef_price",
         "indicator": "beef_price",
+        "display_name": "牛肉价格",
         "special_source": "moa_beef",
     },
     {
         "industry": "Chemicals",
         "indicator_key": "methanol_price",
         "indicator": "methanol_price",
+        "display_name": "甲醇价格",
         "sina_contract": "MA0",
         "basis_var": "MA",
     },
@@ -131,6 +147,7 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "industry": "Chemicals",
         "indicator_key": "rubber_price",
         "indicator": "rubber_price",
+        "display_name": "橡胶价格",
         "sina_contract": "RU0",
         "basis_var": "RU",
     },
@@ -340,6 +357,10 @@ def _expected_hosts_for_spec(spec: dict[str, str]) -> list[str]:
     if str(spec.get("global_symbols") or "").strip():
         hosts.update(_resolve_source_hosts("futures_global_hist_em"))
     special_source = str(spec.get("special_source") or "").strip()
+    if special_source == "sxcoal_cci5500":
+        hosts.update(_resolve_source_hosts("sxcoal_cci5500"))
+    if special_source == "cempi_index":
+        hosts.update(_resolve_source_hosts("cempi_index"))
     if special_source == "construction_index":
         hosts.update(_resolve_source_hosts("macro_china_construction_price_index"))
     if special_source == "soozhu_pork":
@@ -471,6 +492,92 @@ def _fetch_construction_index_series() -> list[tuple[str, float]]:
     if df is None or df.empty:
         return []
     return _normalize_history_frame(df, "日期", "最新值")
+
+
+def _parse_sxcoal_cci5500_html(html: str) -> list[tuple[str, float]]:
+    """Parse public Sxcoal CCI5500 snippets into normalized index points."""
+    compact = re.sub(r"\s+", " ", html or "")
+    points: list[tuple[str, float]] = []
+    year = dt.date.today().year
+
+    direct_patterns = [
+        r"(20\d{2}-\d{2}-\d{2}).{0,120}?CCI5500.{0,80}?(?:上涨|下跌|报|为)?\s*([0-9]+(?:\.[0-9]+)?)\s*元/吨",
+        r"CCI5500.{0,120}?(20\d{2}-\d{2}-\d{2}).{0,80}?([0-9]+(?:\.[0-9]+)?)\s*元/吨",
+    ]
+    for pattern in direct_patterns:
+        for match in re.finditer(pattern, compact, flags=re.IGNORECASE):
+            date_text = to_date_str(match.group(1))
+            value = to_float(match.group(2))
+            if date_text and value is not None:
+                points.append((date_text, value))
+        if points:
+            return _dedupe_points(points)
+
+    md_match = re.search(r"(\d{1,2})月(\d{1,2})日CCI5500", compact)
+    value_match = re.search(r"CCI5500\s*([0-9]+(?:\.[0-9]+)?)\s*元/吨", compact, flags=re.IGNORECASE)
+    if md_match and value_match:
+        month = int(md_match.group(1))
+        day = int(md_match.group(2))
+        value = to_float(value_match.group(1))
+        if value is not None:
+            points.append((f"{year:04d}-{month:02d}-{day:02d}", value))
+    return _dedupe_points(points)
+
+
+def _fetch_sxcoal_cci5500_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[tuple[str, float]]:
+    """Fetch Sxcoal CCI5500 thermal-coal index from public search/article pages."""
+
+    def _load_html() -> str:
+        response = requests.get("https://www.sxcoal.com/news/search?wd=CCI5500", timeout=12)
+        response.raise_for_status()
+        response.encoding = getattr(response, "apparent_encoding", None) or getattr(response, "encoding", None) or "utf-8"
+        return response.text
+
+    html = _call_with_resilience(_load_html)
+    points = _parse_sxcoal_cci5500_html(html)
+    return _filter_points_to_window(points, start_date=start_date, end_date=end_date)
+
+
+def _parse_cempi_index_html(html: str) -> list[tuple[str, float]]:
+    """Parse public CEMPI index page snippets into normalized index points."""
+    compact = re.sub(r"\s+", " ", html or "")
+    patterns = [
+        r"(20\d{2}-\d{2}-\d{2}).{0,120}?CEMPI.{0,120}?([0-9]+(?:\.[0-9]+)?)",
+        r"CEMPI.{0,120}?(20\d{2}-\d{2}-\d{2}).{0,80}?([0-9]+(?:\.[0-9]+)?)",
+    ]
+    points: list[tuple[str, float]] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, compact, flags=re.IGNORECASE):
+            date_text = to_date_str(match.group(1))
+            value = to_float(match.group(2))
+            # CEMPI is a national index, not a rank counter; reject placeholder-like low integers.
+            if value is not None and not (50.0 <= value <= 300.0):
+                continue
+            if date_text and value is not None:
+                points.append((date_text, value))
+        if points:
+            break
+    return _dedupe_points(points)
+
+
+def _fetch_cempi_index_series(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[tuple[str, float]]:
+    """Fetch water-cement price index (CEMPI) from the public Ccement index page."""
+
+    def _load_html() -> str:
+        response = requests.get("https://index.ccement.com/", timeout=12)
+        response.raise_for_status()
+        response.encoding = getattr(response, "apparent_encoding", None) or getattr(response, "encoding", None) or "utf-8"
+        return response.text
+
+    html = _call_with_resilience(_load_html)
+    points = _parse_cempi_index_html(html)
+    return _filter_points_to_window(points, start_date=start_date, end_date=end_date)
 
 
 def _fetch_pork_spot_series() -> list[tuple[str, float]]:
@@ -724,6 +831,14 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
             logger.warning("industry_cycles global source failed indicator=%s err=%s", indicator_key, exc)
 
     special_source = str(spec.get("special_source") or "").strip()
+    if special_source == "sxcoal_cci5500":
+        points = _fetch_sxcoal_cci5500_series(start_date=start_date, end_date=end_date)
+        if points:
+            return points, "sxcoal_cci5500"
+    if special_source == "cempi_index":
+        points = _fetch_cempi_index_series(start_date=start_date, end_date=end_date)
+        if points:
+            return points, "cempi_index"
     if special_source == "construction_index":
         points = _fetch_construction_index_series()
         if points:
@@ -772,6 +887,18 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
         except Exception as exc:
             logger.warning("industry_cycles basis source failed indicator=%s err=%s", indicator_key, exc)
     return [], ""
+
+
+def _classify_industry_fetch_exception(spec: dict[str, str], exc: Exception) -> str:
+    """Classify known source-specific fetch failures into stable status labels."""
+    special_source = str(spec.get("special_source") or "").strip()
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if special_source == "sxcoal_cci5500" and status_code == 403:
+        return "blocked"
+    if special_source == "sxcoal_cci5500" and "403" in str(exc):
+        return "blocked"
+    return "fetch_failed"
 
 
 def _fetch_single_external_series(spec: dict[str, str], start_date: str, end_date: str) -> tuple[list[tuple[str, float]], str]:
@@ -927,10 +1054,11 @@ def fetch_industry_price_rows_with_diagnostics(
                 except Exception as exc:
                     # API assumption: upstream instability is common; continue with other indicators.
                     logger.warning("industry_cycles indicator=%s fetch_failed err=%s", indicator_key, exc)
+                    status_text = _classify_industry_fetch_exception(spec, exc)
                     fetch_results[indicator_key] = {
                         "points": [],
                         "source": None,
-                        "status": "fetch_failed",
+                        "status": status_text,
                         "error": str(exc),
                         "hosts": expected_hosts,
                     }

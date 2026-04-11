@@ -132,3 +132,7 @@ Use this at the top of a new thread:
 ```text
 先读取 /Users/brenda/Projects/investment_assistant/docs/handoff.md 和当前 git diff，再继续当前任务。不要从头设计。
 ```
+
+## 2026-04-10 Industry Reliability Planning
+- Added design and plan docs for industry/external data reliability improvements in the industry-index-source worktree.
+- Planned next implementation focus: cement parser validation, thermal coal blocked/cache semantics, unified industry fallback statuses, and industry source links.

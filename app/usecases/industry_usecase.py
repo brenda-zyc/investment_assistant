@@ -55,21 +55,121 @@ def _build_indicator_row(
     percentile_5y: int | None,
     as_of: str | None,
     source: str | None,
+    source_url: str | None,
     status_item: dict,
     default_status: str,
 ) -> dict:
     """Build one normalized row for industry cycle output."""
     return {
         "industry": spec["industry"],
+        "indicator_key": spec["indicator_key"],
         "indicator": spec["indicator"],
+        "display_name": spec.get("display_name") or spec["indicator"],
         "value": value,
         "1y_percentile": percentile_1y,
         "5y_percentile": percentile_5y,
         "as_of": as_of,
         "source": source,
+        "source_url": source_url,
         "status": status_item.get("status") or default_status,
         "error": status_item.get("error"),
     }
+
+
+def _industry_max_age_days(spec: dict[str, str]) -> int:
+    """Return the freshness window for one industry indicator before cached data becomes stale."""
+    configured = spec.get("max_age_days")
+    if configured is not None:
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
+            pass
+    return 21
+
+
+def _industry_status_for_cached_row(
+    spec: dict[str, str],
+    latest_date: dt.date,
+    status_item: dict,
+) -> dict:
+    """Map refresh diagnostics onto the currently displayed cached row semantics."""
+    refresh_status = str(status_item.get("status") or "").strip()
+    refresh_error = status_item.get("error")
+    max_age_days = _industry_max_age_days(spec)
+    is_stale = latest_date < (dt.date.today() - dt.timedelta(days=max_age_days))
+
+    if refresh_status in {"blocked", "fetch_failed", "dns_failed", "no_data"}:
+        return {
+            "status": "stale" if is_stale else "cached",
+            "error": refresh_error,
+        }
+    if is_stale:
+        return {
+            "status": "stale",
+            "error": refresh_error or f"Cached snapshot is older than {max_age_days} days.",
+        }
+    if refresh_status in {"unknown", ""}:
+        return {}
+    return status_item
+
+
+def _industry_allowed_source_prefixes(spec: dict[str, str]) -> set[str]:
+    """Return raw source prefixes that remain valid for the current indicator mapping."""
+    prefixes: set[str] = set()
+    if str(spec.get("global_symbols") or "").strip():
+        prefixes.add("futures_global_hist_em")
+    special_source = str(spec.get("special_source") or "").strip()
+    if special_source == "sxcoal_cci5500":
+        prefixes.add("sxcoal_cci5500")
+    elif special_source == "cempi_index":
+        prefixes.add("cempi_index")
+    elif special_source == "construction_index":
+        prefixes.add("macro_china_construction_price_index")
+    elif special_source == "soozhu_pork":
+        prefixes.update({"moa_market_info", "spot_hog_lean_price_soozhu"})
+    elif special_source == "soozhu_corn":
+        prefixes.add("spot_corn_price_soozhu")
+    elif special_source == "moa_beef":
+        prefixes.add("moa_market_info")
+    if str(spec.get("sina_contract") or "").strip():
+        prefixes.add("futures_zh_daily_sina")
+    if str(spec.get("basis_var") or "").strip():
+        prefixes.add("futures_spot_price_daily")
+    return prefixes
+
+
+def _industry_source_metadata(spec: dict[str, str], source: str | None) -> tuple[str | None, str | None]:
+    """Return human-readable source label and upstream URL for one industry row."""
+    raw_source = str(source or "").strip()
+    raw_key = raw_source.split(":", 1)[0] if raw_source else ""
+    if raw_key == "futures_zh_daily_sina":
+        contract = raw_source.split(":", 1)[1] if ":" in raw_source else str(spec.get("sina_contract") or "")
+        return "新浪财经", f"https://finance.sina.com.cn/futures/quotes/{contract}.shtml"
+    if raw_key == "futures_global_hist_em":
+        symbol = raw_source.split(":", 1)[1] if ":" in raw_source else str(spec.get("global_symbols") or "").split(",")[0]
+        return "东方财富", f"https://quote.eastmoney.com/globalfuture/{symbol}.html?jump_to_web=true"
+    if raw_key == "spot_hog_lean_price_soozhu":
+        return "搜猪网", "https://www.soozhu.com/"
+    if raw_key == "spot_corn_price_soozhu":
+        return "搜猪网", "https://www.soozhu.com/"
+    if raw_key == "moa_market_info":
+        return "农业农村部", "https://www.moa.gov.cn/xw/zxfb/"
+    if raw_key == "futures_spot_price_daily":
+        return "100ppi", "https://www.100ppi.com/sf/"
+    default_name = str(spec.get("source_name") or "").strip() or raw_source or None
+    default_url = str(spec.get("source_url") or "").strip() or None
+    return default_name, default_url
+
+
+def _industry_source_matches_spec(spec: dict[str, str], source: str | None) -> bool:
+    """Return whether a cached row source is still compatible with the current spec."""
+    raw_source = str(source or "").strip()
+    if not raw_source:
+        return True
+    allowed_prefixes = _industry_allowed_source_prefixes(spec)
+    if not allowed_prefixes:
+        return True
+    return raw_source.split(":", 1)[0] in allowed_prefixes
 
 
 def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = None) -> dict:
@@ -78,10 +178,14 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     grouped_meta: dict[str, dict[str, str]] = {}
     diagnostics = diagnostics or {}
     indicator_status_map: dict[str, dict] = diagnostics.get("indicator_status", {}) or {}
+    specs = get_industry_indicator_specs()
 
     for row in rows:
         indicator_key = str(row.get("indicator") or "").strip()
         if not indicator_key:
+            continue
+        spec = next((item for item in specs if item["indicator_key"] == indicator_key), None)
+        if spec is not None and not _industry_source_matches_spec(spec, row.get("source")):
             continue
         trade_date = _parse_iso_date(row.get("trade_date"))
         value = to_float(row.get("value"))
@@ -100,7 +204,6 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
     output_rows: list[dict] = []
     grouped_output_rows: dict[str, list[dict]] = {}
     as_of_candidates: list[str] = []
-    specs = get_industry_indicator_specs()
 
     for spec in specs:
         indicator_key = spec["indicator_key"]
@@ -113,7 +216,8 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
                 percentile_1y=None,
                 percentile_5y=None,
                 as_of=None,
-                source=None,
+                source=str(spec.get("source_name") or "") or None,
+                source_url=str(spec.get("source_url") or "") or None,
                 status_item=status_item,
                 default_status="no_data",
             )
@@ -126,14 +230,23 @@ def build_industry_cycles_payload(rows: list[dict], diagnostics: dict | None = N
         p5y, _ = _compute_window_percentile(points, latest_date, latest_value, window_days=365 * 5)
         as_of_text = latest_date.isoformat()
         as_of_candidates.append(as_of_text)
-        status_item = indicator_status_map.get(indicator_key, {})
+        status_item = _industry_status_for_cached_row(
+            spec,
+            latest_date,
+            indicator_status_map.get(indicator_key, {}),
+        )
+        source_label, source_url = _industry_source_metadata(
+            spec,
+            grouped_meta.get(indicator_key, {}).get("source") or None,
+        )
         row_payload = _build_indicator_row(
             spec,
             value=latest_value,
             percentile_1y=p1y,
             percentile_5y=p5y,
             as_of=as_of_text,
-            source=grouped_meta.get(indicator_key, {}).get("source") or None,
+            source=source_label,
+            source_url=source_url,
             status_item=status_item,
             default_status="ok",
         )
@@ -462,6 +575,7 @@ def get_industry_cycles(
         history_rows,
         diagnostics=runtime_diagnostics if diagnostics else None,
     )
+    payload["refreshed_at"] = dt.datetime.now().isoformat(timespec="seconds")
     payload["external_rows"] = build_external_data_payload(
         history_external_rows,
         diagnostics=external_runtime_diagnostics if diagnostics else None,
