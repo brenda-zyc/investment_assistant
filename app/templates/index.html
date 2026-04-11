@@ -1058,6 +1058,7 @@
                   <th>1Y Percentile</th>
                   <th>5Y Percentile</th>
                   <th>Source</th>
+                  <th>Link</th>
                   <th>Status</th>
                   <th>Error</th>
                 </tr>
@@ -2539,7 +2540,10 @@
         rows.forEach((row) => {
           const oneYear = row["1y_percentile"] == null ? "-" : `${row["1y_percentile"]}%`;
           const fiveYear = row["5y_percentile"] == null ? "-" : `${row["5y_percentile"]}%`;
-          const source = humanizeSourceLabel(row.source || "-");
+          const source = row.source || humanizeSourceLabel(row.source || "-");
+          const linkHtml = row.source_url
+            ? `<a href="${escapeHtmlAttribute(row.source_url)}" target="_blank" rel="noreferrer">Open</a>`
+            : "-";
           const status = row.status || "-";
           const errorText = row.error || "-";
           const tr = document.createElement("tr");
@@ -2551,6 +2555,7 @@
             <td>${oneYear}</td>
             <td>${fiveYear}</td>
             <td>${source}</td>
+            <td>${linkHtml}</td>
             <td>${status}</td>
             <td>${errorText}</td>
           `;
@@ -2742,7 +2747,7 @@
           const rows = flattenIndustryGroups(data);
           renderIndustryRows(rows);
           const warningText = buildIndustryWarningText(data);
-          industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}.${warningText}`;
+          industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}. Refreshed at: ${data.refreshed_at || "-"}.${warningText}`;
         } catch (err) {
           if (isBackendUnreachable(err)) {
             industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
@@ -2771,7 +2776,7 @@
           const warningText = buildIndustryWarningText(data);
           const industryAsOf = data.as_of || "-";
           const externalAsOf = latestAsOfFromRows(externalRows);
-          industryStatusEl.textContent = `Showing cached snapshot. Industry as of: ${industryAsOf}.${warningText}`;
+          industryStatusEl.textContent = `Showing cached snapshot. Industry as of: ${industryAsOf}. Refreshed at: ${data.refreshed_at || "-"}.${warningText}`;
           externalDataStatusEl.textContent = `Showing cached snapshot. External data as of: ${externalAsOf}.`;
         } catch (err) {
           industryTableBody.innerHTML = "";

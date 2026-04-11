@@ -230,6 +230,134 @@ def test_build_industry_cycles_payload_exposes_indicator_key_and_display_name() 
     assert thermal_row["display_name"] == "动力煤价格指数（CCI5500）"
 
 
+def test_build_industry_cycles_payload_exposes_source_link_for_index_rows() -> None:
+    """Industry payload should carry human-readable source labels and upstream links."""
+    rows = [
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal_index",
+            "trade_date": "2026-04-09",
+            "value": 762.0,
+            "source": "sxcoal_cci5500",
+        },
+        {
+            "industry": "Steel & Construction",
+            "indicator": "cement_price_index",
+            "trade_date": "2026-04-08",
+            "value": 101.2,
+            "source": "cempi_index",
+        },
+    ]
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics={})
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+    cement_row = next(row for row in payload["rows"] if row["indicator_key"] == "cement_price_index")
+
+    assert thermal_row["source"] == "Sxcoal"
+    assert thermal_row["source_url"] == "https://www.sxcoal.com/"
+    assert cement_row["source"] == "水泥网"
+    assert cement_row["source_url"] == "https://index.ccement.com/"
+
+
+def test_build_industry_cycles_payload_marks_fresh_thermal_coal_cache_as_cached_when_source_blocked() -> None:
+    """A compatible fresh cache should stay visible and be labeled cached after a blocked refresh."""
+    rows = [
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal_index",
+            "trade_date": (dt.date.today() - dt.timedelta(days=2)).isoformat(),
+            "value": 762.0,
+            "source": "sxcoal_cci5500",
+        }
+    ]
+    diagnostics = {
+        "indicator_status": {
+            "thermal_coal_index": {
+                "status": "blocked",
+                "error": "403 Client Error",
+            }
+        }
+    }
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics=diagnostics)
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+
+    assert thermal_row["value"] == 762.0
+    assert thermal_row["status"] == "cached"
+
+
+def test_build_industry_cycles_payload_marks_old_thermal_coal_cache_as_stale_when_source_blocked() -> None:
+    """Blocked thermal-coal refresh with old cache should surface stale instead of blocked."""
+    rows = [
+        {
+            "industry": "Energy",
+            "indicator": "thermal_coal_index",
+            "trade_date": (dt.date.today() - dt.timedelta(days=30)).isoformat(),
+            "value": 762.0,
+            "source": "sxcoal_cci5500",
+        }
+    ]
+    diagnostics = {
+        "indicator_status": {
+            "thermal_coal_index": {
+                "status": "blocked",
+                "error": "403 Client Error",
+            }
+        }
+    }
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics=diagnostics)
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+
+    assert thermal_row["value"] == 762.0
+    assert thermal_row["status"] == "stale"
+
+
+def test_build_industry_cycles_payload_keeps_blocked_status_without_compatible_cache() -> None:
+    """Blocked refresh should stay blocked when no compatible cache row exists for the new spec."""
+    diagnostics = {
+        "indicator_status": {
+            "thermal_coal_index": {
+                "status": "blocked",
+                "error": "403 Client Error",
+            }
+        }
+    }
+
+    payload = industry_usecase.build_industry_cycles_payload([], diagnostics=diagnostics)
+    thermal_row = next(row for row in payload["rows"] if row["indicator_key"] == "thermal_coal_index")
+
+    assert thermal_row["value"] is None
+    assert thermal_row["status"] == "blocked"
+
+
+def test_build_industry_cycles_payload_marks_fresh_cache_as_cached_when_refresh_fetch_fails() -> None:
+    """Generic fetch failures should still present a compatible fresh cache as cached."""
+    rows = [
+        {
+            "industry": "Steel & Construction",
+            "indicator": "cement_price_index",
+            "trade_date": (dt.date.today() - dt.timedelta(days=2)).isoformat(),
+            "value": 101.2,
+            "source": "cempi_index",
+        }
+    ]
+    diagnostics = {
+        "indicator_status": {
+            "cement_price_index": {
+                "status": "fetch_failed",
+                "error": "RemoteDisconnected",
+            }
+        }
+    }
+
+    payload = industry_usecase.build_industry_cycles_payload(rows, diagnostics=diagnostics)
+    cement_row = next(row for row in payload["rows"] if row["indicator_key"] == "cement_price_index")
+
+    assert cement_row["value"] == 101.2
+    assert cement_row["status"] == "cached"
+
+
 def test_build_industry_cycles_payload_filters_legacy_indicator_keys() -> None:
     rows = [
         {

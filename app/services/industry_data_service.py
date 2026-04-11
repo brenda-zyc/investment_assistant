@@ -58,6 +58,8 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "indicator": "thermal_coal_index",
         "display_name": "动力煤价格指数（CCI5500）",
         "special_source": "sxcoal_cci5500",
+        "source_name": "Sxcoal",
+        "source_url": "https://www.sxcoal.com/",
     },
     {
         "industry": "New Energy & Metals",
@@ -97,6 +99,8 @@ INDUSTRY_INDICATOR_SPECS: list[dict[str, str]] = [
         "indicator": "cement_price_index",
         "display_name": "水泥价格指数（CEMPI）",
         "special_source": "cempi_index",
+        "source_name": "水泥网",
+        "source_url": "https://index.ccement.com/",
     },
     {
         "industry": "Solar",
@@ -549,6 +553,9 @@ def _parse_cempi_index_html(html: str) -> list[tuple[str, float]]:
         for match in re.finditer(pattern, compact, flags=re.IGNORECASE):
             date_text = to_date_str(match.group(1))
             value = to_float(match.group(2))
+            # CEMPI is a national index, not a rank counter; reject placeholder-like low integers.
+            if value is not None and not (50.0 <= value <= 300.0):
+                continue
             if date_text and value is not None:
                 points.append((date_text, value))
         if points:
@@ -882,6 +889,18 @@ def _fetch_single_industry_series(spec: dict[str, str], start_date: str, end_dat
     return [], ""
 
 
+def _classify_industry_fetch_exception(spec: dict[str, str], exc: Exception) -> str:
+    """Classify known source-specific fetch failures into stable status labels."""
+    special_source = str(spec.get("special_source") or "").strip()
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if special_source == "sxcoal_cci5500" and status_code == 403:
+        return "blocked"
+    if special_source == "sxcoal_cci5500" and "403" in str(exc):
+        return "blocked"
+    return "fetch_failed"
+
+
 def _fetch_single_external_series(spec: dict[str, str], start_date: str, end_date: str) -> tuple[list[tuple[str, float]], str]:
     """Fetch one external indicator series using the configured strategy."""
     fetch_kind = str(spec.get("fetch_kind") or "").strip()
@@ -1035,10 +1054,11 @@ def fetch_industry_price_rows_with_diagnostics(
                 except Exception as exc:
                     # API assumption: upstream instability is common; continue with other indicators.
                     logger.warning("industry_cycles indicator=%s fetch_failed err=%s", indicator_key, exc)
+                    status_text = _classify_industry_fetch_exception(spec, exc)
                     fetch_results[indicator_key] = {
                         "points": [],
                         "source": None,
-                        "status": "fetch_failed",
+                        "status": status_text,
                         "error": str(exc),
                         "hosts": expected_hosts,
                     }

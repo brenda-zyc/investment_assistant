@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import threading
 import pandas as pd
+import requests
 
 from app.services import industry_data_service as industry
 
@@ -93,6 +94,32 @@ def test_fetch_single_industry_series_routes_new_index_sources(monkeypatch) -> N
     assert cement_source == "cempi_index"
 
 
+def test_parse_cempi_index_html_rejects_placeholder_like_value() -> None:
+    """CEMPI parser should reject placeholder-like matches such as rank/order values."""
+    html = """
+    <html>
+      <body>
+        <div>2026-04-10 全国水泥价格指数 CEMPI 排名 1</div>
+      </body>
+    </html>
+    """
+
+    assert industry._parse_cempi_index_html(html) == []
+
+
+def test_parse_cempi_index_html_accepts_reasonable_index_value() -> None:
+    """CEMPI parser should keep realistic index values from the public page."""
+    html = """
+    <html>
+      <body>
+        <div>2026-04-10 全国水泥价格指数 CEMPI 101.2</div>
+      </body>
+    </html>
+    """
+
+    assert industry._parse_cempi_index_html(html) == [("2026-04-10", 101.2)]
+
+
 def test_fetch_industry_price_rows_with_diagnostics_deterministic(monkeypatch) -> None:
     specs = [
         {"industry": "A", "indicator_key": "ok_indicator", "indicator": "ok_indicator"},
@@ -152,6 +179,43 @@ def test_fetch_industry_price_rows_with_diagnostics_deterministic(monkeypatch) -
     assert status_map["dns_indicator"]["status"] == "dns_failed"
     assert status_map["err_indicator"]["status"] == "fetch_failed"
     assert "upstream error" in (status_map["err_indicator"]["error"] or "")
+
+
+def test_fetch_industry_price_rows_with_diagnostics_marks_sxcoal_403_as_blocked(monkeypatch) -> None:
+    """Thermal-coal index should distinguish source blocking from generic fetch failures."""
+    specs = [
+        {
+            "industry": "Energy",
+            "indicator_key": "thermal_coal_index",
+            "indicator": "thermal_coal_index",
+            "special_source": "sxcoal_cci5500",
+        }
+    ]
+
+    monkeypatch.setattr(industry, "INDUSTRY_INDICATOR_SPECS", specs)
+    monkeypatch.setattr(industry, "_build_dns_snapshot", lambda: {"www.sxcoal.com": "dns_ok"})
+    monkeypatch.setattr(industry, "_expected_hosts_for_spec", lambda _spec: ["www.sxcoal.com"])
+    monkeypatch.setattr(industry, "_resolve_source_hosts", lambda _source_name: ["www.sxcoal.com"])
+
+    http_error = requests.HTTPError("403 Client Error: Forbidden for url: https://www.sxcoal.com/")
+    response = requests.Response()
+    response.status_code = 403
+    http_error.response = response
+
+    def fail_fetch_single(*_args, **_kwargs):
+        raise http_error
+
+    monkeypatch.setattr(industry, "_fetch_single_industry_series", fail_fetch_single)
+
+    rows, diagnostics = industry.fetch_industry_price_rows_with_diagnostics(
+        start_date="20260401",
+        end_date="20260410",
+    )
+
+    assert rows == []
+    status_map = diagnostics["indicator_status"]
+    assert status_map["thermal_coal_index"]["status"] == "blocked"
+    assert "403" in (status_map["thermal_coal_index"]["error"] or "")
 
 
 def test_fetch_industry_price_rows_with_diagnostics_fetches_indicators_concurrently(monkeypatch) -> None:

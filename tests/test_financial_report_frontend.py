@@ -239,18 +239,14 @@ def test_industry_table_uses_indicator_as_of_column_label() -> None:
     assert "${row.as_of ?? \"-\"}" in body
 
 
-def test_industry_table_humanizes_internal_source_codes() -> None:
-    """Industry rows should render readable source labels instead of internal fetcher ids."""
+def test_industry_table_renders_source_links_from_payload() -> None:
+    """Industry rows should render upstream links without hardcoding source-specific URL logic in the template."""
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
-    assert "function humanizeSourceLabel(source)" in source
-    assert '["spot_hog_lean_price_soozhu", "搜猪网"]' in source
-    assert '["moa_market_info", "农业农村部"]' in source
-    assert '["sxcoal_cci5500", "Sxcoal"]' in source
-    assert '["cempi_index", "水泥网"]' in source
-
+    assert "<th>Link</th>" in source
     body = _function_body(source, "function renderIndustryRows(rows)")
-    assert "humanizeSourceLabel(row.source || \"-\")" in body
+    assert "row.source_url" in body
+    assert 'target="_blank" rel="noreferrer">Open</a>' in body
 
 
 def test_industry_table_prefers_display_name_over_internal_key() -> None:
@@ -268,3 +264,13 @@ def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> No
 
     assert 'industryStatusEl.textContent = "Loading industry cycles...";' in body
     assert 'industryTableBody.innerHTML = "";' not in body
+
+
+def test_industry_status_text_mentions_refreshed_at_timestamp() -> None:
+    """Industry status text should distinguish indicator dates from the current refresh time."""
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    load_body = _function_body(source, "async function loadIndustryCycles()")
+    cached_body = _function_body(source, "async function loadCachedIndustryCycles()")
+
+    assert "Refreshed at:" in load_body
+    assert "Refreshed at:" in cached_body
