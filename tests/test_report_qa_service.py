@@ -426,8 +426,260 @@ def test_answer_report_question_accepts_llm_answer_alias_fields(monkeypatch) -> 
 
     assert payload["mode"] == "llm_hybrid"
     assert payload["short_answer"] == "海外业务和产品结构优化带动利润改善。"
-    assert payload["evidence"] == ["海外收入同比增长"]
+    assert payload["evidence"] == []
     assert payload["citations"] == [{"source": "report_text", "snippet": "海外收入同比增长"}]
+
+
+def test_answer_report_question_cleans_dense_table_row_support_from_llm_payload(monkeypatch) -> None:
+    """Dense table rows from the model should be compacted and de-duplicated before rendering."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": "贵州茅台2024年年度报告正文。",
+            "answers": [],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "net_profit": 86228000000.0,
+                "deducted_net_profit": 86240905977.42,
+            },
+        },
+    )
+
+    def fake_llm(**kwargs):
+        assert kwargs["question"] == "扣非净利润和净利润分别为多少？"
+        return {
+            "short_answer": "扣非净利润为862.41亿元，净利润为862.28亿元。",
+            "evidence": [
+                "扣非净利润与净利润口径接近。",
+                "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                "归属于上市公司股东的扣除非经常性损益的净利润 86,240,905,977.42 74,752,564,425.52 15.37 62,792,896,829.57",
+            ],
+            "citations": [
+                {
+                    "source": "report_text",
+                    "snippet": "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                },
+                {
+                    "source": "report_text",
+                    "snippet": "归属于上市公司股东的扣除非经常性损益的净利润 86,240,905,977.42 74,752,564,425.52 15.37 62,792,896,829.57",
+                },
+            ],
+            "confidence": "high",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="扣非净利润和净利润分别为多少？",
+        history=[],
+        session_summary="",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "llm_hybrid"
+    assert payload["short_answer"] == "扣非净利润为862.41亿元，净利润为862.28亿元。"
+    assert payload["evidence"] == ["扣非净利润与净利润口径接近。"]
+    assert payload["citations"] == [
+        {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62。"},
+        {"source": "report_text", "snippet": "归属于上市公司股东的扣除非经常性损益的净利润86,240,905,977.42。"},
+    ]
+
+
+def test_answer_report_question_answers_direct_numeric_metric_question_from_extracted_metrics() -> None:
+    """Rule fallback should answer direct metric questions when structured values are already available."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": "贵州茅台2024年年度报告正文。",
+            "answers": [],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="扣非净利润和净利润分别为多少？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert "扣非净利润约862.41亿元" in payload["short_answer"]
+    assert "净利润约862.28亿元" in payload["short_answer"]
+    assert payload["evidence"] == [
+        "报告期（2024年）扣非净利润 = 86,240,905,977.42元（约862.41亿元）。",
+        "报告期（2024年）净利润 = 86,228,146,421.62元（约862.28亿元）。",
+    ]
+
+
+def test_answer_report_question_answers_partially_when_one_direct_metric_is_missing() -> None:
+    """Direct metric questions should surface available values and call out structured gaps explicitly."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": "贵州茅台2024年年度报告正文。",
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": None,
+            },
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="扣非净利润和净利润分别为多少？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert "净利润约862.28亿元" in payload["short_answer"]
+    assert "扣非净利润原值当前未稳定抽取到" in payload["short_answer"]
+    assert payload["evidence"] == [
+        "报告期（2024年）扣非净利润补充线索：扣非净利润/净利润 = 1.00x。",
+        "报告期（2024年）净利润 = 86,228,146,421.62元（约862.28亿元）。",
+    ]
+
+
+def test_answer_report_question_uses_report_reason_lines_for_growth_driver_fallback() -> None:
+    """Growth-driver questions should prefer report reason lines over raw metric dumps."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "净利润是否可持续？",
+                    "summary": "收入、利润和资本回报率信号整体稳定，利润延续性较强。",
+                    "evidence": ["收入 CAGR = 8.52%。", "最新收入同比 = 15.28%。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+            },
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="今年利润增长主要来自哪里？",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert "销量增加" in payload["short_answer"]
+    assert "价格调整" in payload["short_answer"]
+    assert payload["short_answer"] != "收入、利润和资本回报率信号整体稳定，利润延续性较强。"
+    assert any("营业收入变动原因说明" in item for item in payload["evidence"])
+    assert not any(item.startswith("revenue:") for item in payload["evidence"])
+
+
+def test_answer_report_question_authenticity_follow_up_uses_fresh_explanatory_answer() -> None:
+    """Authenticity follow-ups should not collapse back to the same generic cached summary after prior ratio answers."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": (
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="为什么你认为净利润较为真实？",
+        history=[
+            {"role": "user", "content": "经营现金流和净利润匹配吗？"},
+            {
+                "role": "assistant",
+                "content": "匹配，经营现金流/净利润 = 1.07x。",
+                "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+            },
+            {"role": "user", "content": "扣非净利润和净利润分别为多少？"},
+            {
+                "role": "assistant",
+                "content": "扣非净利润约862.41亿元，净利润约862.28亿元。",
+                "evidence": [
+                    "报告期（2024年）扣非净利润 = 86,240,905,977.42元（约862.41亿元）。",
+                    "报告期（2024年）净利润 = 86,228,146,421.62元（约862.28亿元）。",
+                ],
+            },
+        ],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert payload["mode"] == "rule_fallback"
+    assert payload["short_answer"] != "利润与现金流、扣非口径的偏离不大，利润质量整体较好。"
+    assert "经营现金流" in payload["short_answer"]
+    assert "扣非净利润" in payload["short_answer"]
+    assert payload["evidence"]
 
 
 def test_answer_report_question_falls_back_when_llm_payload_has_no_answer_content(monkeypatch) -> None:
@@ -693,6 +945,123 @@ def test_answer_report_question_returns_llm_hybrid_for_follow_up_without_cached_
     ]
     assert captured["session_summary"] == "上一轮重点在现金流改善。"
     assert "上一轮关于“之前我们讨论过现金流”" in captured["question"]
+
+
+def test_answer_report_question_forwards_structured_assistant_history_to_llm(monkeypatch) -> None:
+    """Assistant history should preserve prior evidence and citations so the LLM can avoid repeats."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": "贵州茅台2024年年度报告正文。",
+            "answers": [],
+            "llm_analysis": None,
+            "extracted_metrics": {},
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_llm(**kwargs):
+        captured["history"] = kwargs["history"]
+        return {
+            "short_answer": "follow-up answer",
+            "evidence": [],
+            "citations": [{"source": "report_text", "snippet": "新增片段"}],
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="为什么你认为净利润较为真实？",
+        history=[
+            {
+                "role": "assistant",
+                "content": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}],
+            }
+        ],
+        session_summary="上一轮重点讲了现金流和扣非口径。",
+        use_llm=True,
+    )
+
+    assert captured["history"] == [
+        {
+            "role": "assistant",
+            "content": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+            "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+            "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}],
+        }
+    ]
+
+
+def test_answer_report_question_filters_support_already_covered_by_recent_history(monkeypatch) -> None:
+    """Repeated support from earlier assistant turns should be removed when the current answer adds nothing new."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF"},
+            "report_text": "贵州茅台2024年年度报告正文。",
+            "answers": [],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    def fake_llm(**kwargs):
+        _ = kwargs
+        return {
+            "short_answer": "净利润较为真实，主要因为经营现金流与净利润匹配度高，且扣非净利润与净利润基本一致。",
+            "evidence": [
+                "经营现金流/净利润 = 1.07x。",
+                "扣非净利润/净利润 = 1.00x。",
+                "经营活动产生的现金流量净额92,463,692,168.43元。",
+            ],
+            "citations": [
+                {"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"},
+                {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62元。"},
+                {"source": "report_text", "snippet": "归属于上市公司股东的扣除非经常性损益的净利润86,240,905,977.42元。"},
+            ],
+            "confidence": "high",
+        }
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    payload = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        question="为什么你认为净利润较为真实？",
+        history=[
+            {
+                "role": "assistant",
+                "content": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}],
+            }
+        ],
+        session_summary="上一轮重点讲了现金流和扣非口径。",
+        use_llm=True,
+    )
+
+    assert payload["mode"] == "llm_hybrid"
+    assert payload["evidence"] == []
+    assert payload["citations"] == [
+        {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62元。"},
+        {"source": "report_text", "snippet": "归属于上市公司股东的扣除非经常性损益的净利润86,240,905,977.42元。"},
+    ]
 
 
 def test_answer_report_question_rewrites_weak_follow_up_to_last_non_generic_user_question(monkeypatch) -> None:
