@@ -328,7 +328,7 @@ def test_analyze_financial_report_url_returns_report_key_and_caches_context(monk
     )
     monkeypatch.setattr(
         financial_report_usecase,
-        "extract_financial_row_from_report_text",
+        "extract_report_assessment_metrics",
         lambda _text, title=None: {
             "report_year": 2024,
             "report_date": "2024-12-31",
@@ -376,7 +376,7 @@ def test_analyze_financial_report_url_returns_none_report_key_when_report_text_i
     )
     monkeypatch.setattr(
         financial_report_usecase,
-        "extract_financial_row_from_report_text",
+        "extract_report_assessment_metrics",
         lambda _text, title=None: {
             "report_year": 2024,
             "report_date": "2024-12-31",
@@ -417,7 +417,7 @@ def test_analyze_financial_report_url_keeps_unknown_report_year_as_missing(monke
     )
     monkeypatch.setattr(
         financial_report_usecase,
-        "extract_financial_row_from_report_text",
+        "extract_report_assessment_metrics",
         lambda _text, title=None: {
             "report_year": None,
             "report_date": None,
@@ -523,7 +523,11 @@ def test_financial_report_autoread_reuses_latest_artifact_when_force_refresh_fal
             "content_type": "application/pdf",
             "pdf_pages": 180,
             "report_text": "cached report text",
-            "extracted_metrics": {"report_date": "2025-12-31", "revenue": 100.0},
+            "extracted_metrics": {
+                "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+                "report_date": "2025-12-31",
+                "revenue": 100.0,
+            },
             "answers": [{"id": "profit_authenticity", "summary": "cached"}],
             "llm_analysis": None,
             "current_mode": "report_text_extracted",
@@ -548,6 +552,88 @@ def test_financial_report_autoread_reuses_latest_artifact_when_force_refresh_fal
     assert cached_context["report_text"] == "cached report text"
 
 
+def test_financial_report_autoread_ignores_current_url_analysis_artifact_for_same_symbol(monkeypatch) -> None:
+    """Auto-read should not reuse a same-symbol artifact created by manual URL analysis."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_latest_report_artifact_for_symbol",
+        lambda symbol: {
+            "report_key": "600519|https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+            "symbol": symbol,
+            "document_url": "https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+            "detail_url": None,
+            "title": "1225002214.PDF",
+            "published_at": None,
+            "content_type": "application/pdf",
+            "pdf_pages": 232,
+            "report_text": "manual url analysis report text",
+            "extracted_metrics": {
+                "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+                "report_year": 2025,
+                "report_date": "2025-12-31",
+                "revenue": 423_701_834_000.0,
+                "net_profit": 72_201_282_000.0,
+            },
+            "answers": [{"id": "profit_authenticity", "summary": "manual"}],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-12T09:00:00",
+        },
+    )
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {"600519": "贵州茅台"})
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_assessment_context", lambda _symbol: {})
+    monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "find_latest_annual_report",
+        lambda symbol: {
+            "symbol": symbol,
+            "title": "2025年年度报告",
+            "published_at": "2026-03-31 00:00:00",
+            "detail_url": "https://www.cninfo.com.cn/new/disclosure/detail?plate=sh&stockCode=600519",
+            "document_url": "https://static.cninfo.com.cn/finalpage/2026-03-31/1225999999.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda _url: {
+            "text": "fresh moutai report text",
+            "content_type": "application/pdf",
+            "pdf_pages": 188,
+            "tls_insecure": False,
+            "title": "1225999999.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_report_assessment_metrics",
+        lambda _text, title=None: {
+            "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+            "report_year": 2025,
+            "report_date": "2025-12-31",
+            "revenue": 174_100_000_000.0,
+            "net_profit": 87_000_000_000.0,
+            "roe": None,
+            "debt_ratio": None,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
+
+    payload = financial_report_usecase.autonomous_financial_report_read("600519", force_refresh=False)
+
+    assert payload["symbol"] == "600519"
+    assert payload["report"]["title"] == "2025年年度报告"
+    assert payload["report_key"] == "600519|https://static.cninfo.com.cn/finalpage/2026-03-31/1225999999.PDF"
+    assert payload["answers"][0]["summary"] != "manual"
+
+
 def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refresh_false(monkeypatch) -> None:
     """URL analysis should return a persisted artifact when the report key already exists."""
     report_qa_service.clear_report_context_cache()
@@ -565,6 +651,7 @@ def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refres
             "pdf_pages": 180,
             "report_text": "cached report text",
             "extracted_metrics": {
+                "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
                 "report_year": 2025,
                 "report_date": "2025-12-31",
                 "revenue": 100.0,
@@ -592,3 +679,234 @@ def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refres
 
     assert payload["report_key"] == "000333|https://static.cninfo.com.cn/report.pdf"
     assert payload["extracted"]["revenue"] == 100.0
+
+
+def test_analyze_financial_report_url_refreshes_stale_artifact_without_current_extraction_version(monkeypatch) -> None:
+    """URL analysis should ignore stale cached artifacts created before the current parser rules."""
+    report_qa_service.clear_report_context_cache()
+    captured: dict[str, object] = {"fetches": 0, "persisted": None}
+
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_artifact",
+        lambda report_key: {
+            "report_key": report_key,
+            "symbol": "300750",
+            "document_url": "https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+            "detail_url": None,
+            "title": "1225002214.PDF",
+            "published_at": None,
+            "content_type": "application/pdf",
+            "pdf_pages": 232,
+            "report_text": "stale report text",
+            "extracted_metrics": {
+                "report_year": 2050,
+                "report_date": "2026-03-09",
+                "revenue": 423_701_834.0,
+                "net_profit": 0.0,
+                "roe": None,
+                "debt_ratio": 61.94,
+            },
+            "answers": [],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-11T15:00:00",
+        },
+    )
+
+    def fake_fetch(url: str) -> dict:
+        captured["fetches"] = int(captured["fetches"]) + 1
+        return {
+            "url": url,
+            "text": "fresh report text",
+            "content_type": "application/pdf",
+            "pdf_pages": 232,
+            "tls_insecure": False,
+            "title": "1225002214.PDF",
+        }
+
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_text_from_url", fake_fetch)
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_report_assessment_metrics",
+        lambda _text, title=None: {
+            "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+            "report_year": 2025,
+            "report_date": "2025-12-31",
+            "revenue": 423_701_834_000.0,
+            "net_profit": 72_201_282_000.0,
+            "roe": None,
+            "debt_ratio": 61.94,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "upsert_report_artifact",
+        lambda row: captured.__setitem__("persisted", row),
+    )
+
+    payload = financial_report_usecase.analyze_financial_report_url(
+        "https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+        symbol="300750",
+        force_refresh=False,
+    )
+
+    assert captured["fetches"] == 1
+    assert payload["analysis"]["latest_report_year"] == 2025
+    assert payload["analysis"]["as_of"] == "2025-12-31"
+    assert payload["extracted"]["net_profit"] == 72_201_282_000.0
+    assert captured["persisted"]["extracted_metrics"]["extraction_version"] == financial_report_usecase.REPORT_EXTRACTION_VERSION
+
+
+def test_financial_report_autoread_refreshes_stale_artifact_without_current_extraction_version(monkeypatch) -> None:
+    """Auto-read should refresh stale cached artifacts instead of reusing older parser output forever."""
+    report_qa_service.clear_report_context_cache()
+    captured: dict[str, object] = {"persisted": None}
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_latest_report_artifact_for_symbol",
+        lambda symbol: {
+            "report_key": "300750|https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+            "symbol": symbol,
+            "document_url": "https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+            "detail_url": "https://www.cninfo.com.cn/new/disclosure/detail?plate=szse&orgId=9900000000&stockCode=300750",
+            "title": "1225002214.PDF",
+            "published_at": "2026-03-10 00:00:00",
+            "content_type": "application/pdf",
+            "pdf_pages": 232,
+            "report_text": "stale report text",
+            "extracted_metrics": {
+                "report_year": 2050,
+                "report_date": "2026-03-09",
+                "revenue": 423_701_834.0,
+                "net_profit": 0.0,
+            },
+            "answers": [{"id": "profit_authenticity", "summary": "stale"}],
+            "llm_analysis": None,
+            "current_mode": "report_text_extracted",
+            "parsed_at": "2026-04-11T15:00:00",
+        },
+    )
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {"300750": "宁德时代"})
+    monkeypatch.setattr(financial_report_usecase, "fetch_report_assessment_context", lambda _symbol: {})
+    monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "find_latest_annual_report",
+        lambda symbol: {
+            "symbol": symbol,
+            "title": "2025年年度报告",
+            "published_at": "2026-03-10 00:00:00",
+            "detail_url": "https://www.cninfo.com.cn/new/disclosure/detail?plate=szse&orgId=9900000000&stockCode=300750",
+            "document_url": "https://static.cninfo.com.cn/finalpage/2026-03-10/1225002214.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda _url: {
+            "text": "fresh report text",
+            "content_type": "application/pdf",
+            "pdf_pages": 232,
+            "tls_insecure": False,
+            "title": "1225002214.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_report_assessment_metrics",
+        lambda _text, title=None: {
+            "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+            "report_year": 2025,
+            "report_date": "2025-12-31",
+            "revenue": 423_701_834_000.0,
+            "net_profit": 72_201_282_000.0,
+            "roe": None,
+            "debt_ratio": 61.94,
+            "deducted_net_profit": None,
+            "operating_cash_flow": None,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "upsert_report_artifact",
+        lambda row: captured.__setitem__("persisted", row),
+    )
+
+    payload = financial_report_usecase.autonomous_financial_report_read("300750", force_refresh=False)
+
+    assert payload["report"]["title"] == "2025年年度报告"
+    assert payload["as_of"] == "2025-12-31"
+    assert payload["extracted_metrics"]["report_year"] == 2025
+    assert payload["answers"][0]["summary"] != "stale"
+    assert captured["persisted"]["extracted_metrics"]["extraction_version"] == financial_report_usecase.REPORT_EXTRACTION_VERSION
+
+
+def test_financial_report_autoread_uses_active_report_date_for_as_of_when_history_has_newer_date(monkeypatch) -> None:
+    """Auto-read should label the active annual report date, not a newer historical series endpoint."""
+    report_qa_service.clear_report_context_cache()
+    monkeypatch.setattr(financial_report_usecase, "fetch_latest_report_artifact_for_symbol", lambda _symbol: None)
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", lambda _row: None)
+    monkeypatch.setattr(financial_report_usecase, "get_effective_llm_config", lambda: None)
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {"600519": "贵州茅台"})
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_assessment_context",
+        lambda _symbol: {
+            "revenue": [("2025-12-31", 180.0)],
+            "net_profit": [("2025-12-31", 90.0)],
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "find_latest_annual_report",
+        lambda symbol: {
+            "symbol": symbol,
+            "title": "贵州茅台2024年年度报告",
+            "published_at": "2025-04-03 00:00:00",
+            "detail_url": "https://www.cninfo.com.cn/new/disclosure/detail?stockCode=600519",
+            "document_url": "https://static.cninfo.com.cn/finalpage/2025-04-03/1222993920.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_report_text_from_url",
+        lambda _url: {
+            "text": "fresh report text",
+            "content_type": "application/pdf",
+            "pdf_pages": 143,
+            "tls_insecure": False,
+            "title": "1222993920.PDF",
+        },
+    )
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "extract_report_assessment_metrics",
+        lambda _text, title=None: {
+            "extraction_version": financial_report_usecase.REPORT_EXTRACTION_VERSION,
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 170_899_152_276.34,
+            "net_profit": 86_228_000_000.0,
+            "roe": None,
+            "debt_ratio": None,
+            "deducted_net_profit": 86_240_905_977.42,
+            "operating_cash_flow": 92_463_692_168.43,
+            "capex_cash_outflow": None,
+            "evidence": [],
+            "warnings": [],
+        },
+    )
+
+    payload = financial_report_usecase.autonomous_financial_report_read("600519", force_refresh=False)
+
+    assert payload["report"]["title"] == "贵州茅台2024年年度报告"
+    assert payload["as_of"] == "2024-12-31"

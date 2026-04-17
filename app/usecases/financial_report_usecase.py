@@ -13,6 +13,7 @@ from app.db import (
     upsert_report_artifact,
 )
 from app.services.financial_report_service import (
+    REPORT_EXTRACTION_VERSION,
     build_autoread_llm_excerpt,
     extract_report_assessment_metrics,
     extract_financial_row_from_report_text,
@@ -30,6 +31,19 @@ from app.services.market_data_service import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _artifact_has_current_extraction_version(row: dict[str, Any] | None) -> bool:
+    """Return whether a persisted artifact was produced by the current parser rules."""
+    extracted_metrics = (row or {}).get("extracted_metrics") or {}
+    return extracted_metrics.get("extraction_version") == REPORT_EXTRACTION_VERSION
+
+
+def _artifact_is_eligible_for_autoread_reuse(row: dict[str, Any] | None) -> bool:
+    """Return whether a cached artifact is safe to reuse as the stock's active annual report."""
+    if not row or not _artifact_has_current_extraction_version(row):
+        return False
+    return bool(str((row or {}).get("detail_url") or "").strip())
 
 
 def get_financial_report_analysis(symbol: str, *, refresh: bool = False) -> dict:
@@ -75,13 +89,15 @@ def analyze_financial_report_url(
     report_key = build_report_key(symbol, report_stub) if symbol else None
     if report_key and not force_refresh:
         artifact_row = fetch_report_artifact(report_key)
-        if artifact_row:
+        if artifact_row and _artifact_has_current_extraction_version(artifact_row):
             _store_hot_report_context_from_artifact(artifact_row)
             return _restore_url_analysis_payload_from_artifact(artifact_row)
+        if artifact_row:
+            logger.info("Refreshing stale report artifact for %s due to extraction-version mismatch.", report_key)
 
     fetched = fetch_report_text_from_url(url)
 
-    extracted = extract_financial_row_from_report_text(fetched["text"], title=fetched.get("title"))
+    extracted = extract_report_assessment_metrics(fetched["text"], title=fetched.get("title"))
     analysis_payload = _build_url_analysis_payload(extracted)
 
     if extracted.get("warnings"):
@@ -172,6 +188,17 @@ def _latest_as_of_date(
         if points:
             candidates.append(str(points[-1][0]))
     return max(candidates) if candidates else None
+
+
+def _autoread_as_of_date(
+    extracted_metrics: dict | None,
+    historical_context: dict[str, list[tuple[str, float]]] | None,
+) -> str | None:
+    """Return the active report's as-of date, falling back to historical context only when needed."""
+    report_date = (extracted_metrics or {}).get("report_date")
+    if report_date:
+        return str(report_date)
+    return _latest_as_of_date(extracted_metrics, historical_context)
 
 
 def _has_usable_report_metrics(extracted_metrics: dict | None) -> bool:
@@ -272,7 +299,10 @@ def _artifact_row(
         "content_type": (report or {}).get("content_type"),
         "pdf_pages": (report or {}).get("pdf_pages"),
         "report_text": report_text,
-        "extracted_metrics": extracted_metrics or {},
+        "extracted_metrics": {
+            **(extracted_metrics or {}),
+            "extraction_version": REPORT_EXTRACTION_VERSION,
+        },
         "answers": answers or [],
         "llm_analysis": llm_analysis,
         "current_mode": "report_text_extracted" if _has_usable_report_metrics(extracted_metrics) else "historical_fallback",
@@ -353,7 +383,7 @@ def _restore_autoread_payload_from_artifact(
         "llm_provider": llm_config.get("provider") if llm_config else None,
         "llm_model": llm_config.get("model") if llm_config else None,
         "llm_analysis": llm_analysis,
-        "as_of": _latest_as_of_date(stored_metrics, historical_context),
+        "as_of": _autoread_as_of_date(stored_metrics, historical_context),
         "report": {
             "title": row.get("title"),
             "published_at": row.get("published_at"),
@@ -390,7 +420,7 @@ def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False
     llm_config = get_effective_llm_config()
     if not force_refresh:
         latest_artifact = fetch_latest_report_artifact_for_symbol(symbol)
-        if latest_artifact:
+        if latest_artifact and _artifact_is_eligible_for_autoread_reuse(latest_artifact):
             _store_hot_report_context_from_artifact(latest_artifact)
             return _restore_autoread_payload_from_artifact(
                 latest_artifact,
@@ -399,6 +429,17 @@ def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False
                 warnings=warnings,
                 llm_config=llm_config,
             )
+        if latest_artifact:
+            if _artifact_has_current_extraction_version(latest_artifact):
+                logger.info(
+                    "Ignoring latest report artifact for %s because it lacks disclosure metadata and likely came from manual URL analysis.",
+                    symbol,
+                )
+            else:
+                logger.info(
+                    "Refreshing stale latest report artifact for %s due to extraction-version mismatch.",
+                    symbol,
+                )
 
     report_meta: dict | None = None
     fetched_report: dict | None = None
@@ -487,7 +528,7 @@ def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False
         "llm_provider": llm_config.get("provider") if llm_config else None,
         "llm_model": llm_config.get("model") if llm_config else None,
         "llm_analysis": llm_analysis,
-        "as_of": _latest_as_of_date(extracted_metrics, historical_context),
+        "as_of": _autoread_as_of_date(extracted_metrics, historical_context),
         "report": {
             "title": report_meta.get("title") if report_meta else None,
             "published_at": report_meta.get("published_at") if report_meta else None,

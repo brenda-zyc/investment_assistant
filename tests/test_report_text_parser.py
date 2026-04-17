@@ -35,6 +35,79 @@ def test_extract_financial_row_from_chinese_report_text() -> None:
         assert "score" in evidence
 
 
+def test_extract_financial_row_handles_pdf_whitespace_split_metric_keyword() -> None:
+    text = """
+    宁德时代新能源科技股份有限公司2025年年度报告全文
+    主要会计数据和财务指标
+    单位：千元
+    营业收入 423,701,834 362,012,554 17.04%
+    归属于上市公司股东的净利润 72,201,282 50,744,682 42.28%
+    加权平均净资产收益
+    率 24.91% 24.13% 0.78% 24.04%
+    资产负债率 61.94% 65.24% -3.30%
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="1225002214.PDF")
+
+    assert payload["roe"] == 24.91
+
+
+def test_extract_financial_row_infers_percent_unit_from_metric_header() -> None:
+    text = """
+    贵州茅台2025年年度报告
+    主要会计数据和财务指标
+    项目 2025年 2024年 本年比上年增减 2023年
+    加权平均净资产收益率（%） 32.53 36.02 减少3.49个百分点 34.19
+    资产负债率（%） 37.89 40.72 -2.83 41.15
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="贵州茅台2025年年度报告")
+
+    assert payload["roe"] == 32.53
+    assert payload["debt_ratio"] == 37.89
+
+
+def test_extract_financial_row_ignores_debt_ratio_threshold_in_guarantee_section() -> None:
+    text = """
+    内蒙古伊利实业集团股份有限公司2024年年度报告
+    流动比率 0.74 0.90 -17.78
+    速动比率 0.62 0.74 -16.22
+    资产负债率（%） 62.91 62.19 1.16
+    EBITDA全部债务比 0.27 0.31 -12.90
+
+    公司担保总额情况（包括对子公司的担保）
+    直接或间接为资产负债率超过70%的被担保对象提供的债务担保金额（D） 9,749.34
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="内蒙古伊利实业集团股份有限公司2024年年度报告")
+
+    assert payload["debt_ratio"] == 62.91
+
+
+def test_extract_financial_row_extracts_balance_sheet_skeleton_fields() -> None:
+    text = """
+    宜宾五粮液股份有限公司2024年年度报告
+    主要会计数据和财务指标
+    2024 年末 2023 年末 本年末比上年末增减 2022 年末
+    总资产（元） 188,252,218,704.17 165,432,981,684.75 13.79% 152,811,927,251.18
+    归属于上市公司股东的净资产（元） 133,285,282,015.97 129,558,241,040.51 2.88% 114,027,897,212.18
+
+    合并资产负债表
+    单位：元
+    流动负债合计 51,026,506,357.06 32,683,139,984.65
+    非流动负债合计 830,918,614.42 400,468,512.93
+    负债合计 51,857,424,971.48 33,083,608,497.58
+    所有者权益合计 136,394,793,732.69 132,349,373,187.17
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="宜宾五粮液股份有限公司2024年年度报告")
+
+    assert payload["total_assets"] == 188252218704.17
+    assert payload["attributable_equity"] == 133285282015.97
+    assert payload["total_liabilities"] == 51857424971.48
+    assert payload["net_assets"] == 136394793732.69
+
+
 def test_extract_financial_row_with_sparse_text() -> None:
     text = "这是一个公告页面，但没有关键财务指标。"
     payload = extract_financial_row_from_report_text(text, title="测试公告")
@@ -67,6 +140,28 @@ def test_extract_report_assessment_metrics_extracts_quality_fields() -> None:
     assert len(payload["evidence"]) >= 7
 
 
+def test_extract_report_assessment_metrics_preserves_balance_sheet_skeleton_fields() -> None:
+    text = """
+    贵州茅台2025年年度报告
+    主要会计数据和财务指标
+    2025年末 2024年末 本期末比上年同期末增减（%） 2023年末
+    归属于上市公司股东的净资产 244,637,811,032.18 233,105,984,399.47 4.95 215,668,571,607.43
+    总资产 303,834,844,021.44 298,944,579,918.70 1.64 272,699,660,092.25
+    经营活动产生的现金流量净额 92,463,692,168.43 66,508,744,851.05 39.03%
+    合并资产负债表
+    单位：元
+    负债合计 49,875,590,112.37 56,933,264,798.10
+    所有者权益（或股东权益）合计 253,959,253,909.07 242,011,315,120.60
+    """
+
+    payload = extract_report_assessment_metrics(text, title="贵州茅台2025年年度报告")
+
+    assert payload["total_assets"] == 303834844021.44
+    assert payload["attributable_equity"] == 244637811032.18
+    assert payload["total_liabilities"] == 49875590112.37
+    assert payload["net_assets"] == 253959253909.07
+
+
 def test_extract_report_assessment_metrics_prefers_title_year_over_future_mentions() -> None:
     text = """
     2026年3月发布。公司计划在2028年继续扩大海外业务。
@@ -79,6 +174,70 @@ def test_extract_report_assessment_metrics_prefers_title_year_over_future_mentio
     assert payload["report_date"] == "2025-12-31"
 
 
+def test_extract_financial_row_prefers_annual_report_title_in_body_over_signature_and_future_years() -> None:
+    text = """
+    宁德时代新能源科技股份有限公司2025年年度报告全文
+    董事长：曾毓群
+    宁德时代新能源科技股份有限公司
+    2026年3月9日
+
+    国际能源署（IEA）预测，到2050年实现净零排放，全球年度能源投资将持续增长。
+
+    主要会计数据和财务指标
+    单位：百万元
+    项目 2025年 2024年 本年比上年增减
+    营业收入 423,701 362,013 17.04%
+    归属于上市公司股东的净利润 72,201 50,745 42.28%
+    资产负债率 61.94% 65.24% -3.30%
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="1225002214.PDF")
+
+    assert payload["report_year"] == 2025
+    assert payload["report_date"] == "2025-12-31"
+
+
+def test_extract_financial_row_uses_unit_context_and_ignores_merger_zero_profit_note() -> None:
+    text = """
+    宁德时代新能源科技股份有限公司2025年年度报告全文
+
+    主要会计数据和财务指标
+    单位：百万元
+    项目 2025年 2024年 本年比上年增减
+    营业收入 423,701 362,013 17.04%
+    归属于上市公司股东的净利润 72,201 50,745 42.28%
+    资产负债率 61.94% 65.24% -3.30%
+
+    控制下企业合并的，被合并方在合并前实现的净利润为：0元，上期被合并方实现的净利润为：0元。
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="1225002214.PDF")
+
+    assert payload["revenue"] == 423701 * 1000000
+    assert payload["net_profit"] == 72201 * 1000000
+    assert payload["debt_ratio"] == 61.94
+    net_profit_evidence = next(item for item in payload["evidence"] if item["metric"] == "net_profit")
+    assert "被合并方" not in net_profit_evidence["snippet"]
+
+
+def test_extract_financial_row_ignores_section_index_before_revenue_keyword() -> None:
+    text = """
+    宁德时代新能源科技股份有限公司2025年年度报告全文
+    五、主要会计数据和财务指标
+    1）营业收入整体情况
+    单位：千元
+    项目 2025年 2024年 本年比上年增减 2023年
+    营业收入 423,701,834 362,012,554 17.04% 400,917,045
+    归属于上市公司股东的净利润 72,201,282 50,744,682 42.28% 44,121,248
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="1225002214.PDF")
+
+    assert payload["revenue"] == 423701834 * 1000
+    revenue_evidence = next(item for item in payload["evidence"] if item["metric"] == "revenue")
+    assert revenue_evidence["raw_number"] == "423,701,834"
+
+
 def test_extract_report_assessment_metrics_rejects_unitless_cash_flow_amount() -> None:
     text = """
     2025年年度报告。营业收入4,585亿元，归母净利润439.5亿元，
@@ -89,6 +248,60 @@ def test_extract_report_assessment_metrics_rejects_unitless_cash_flow_amount() -
 
     assert payload["operating_cash_flow"] is None
     assert "Operating cash flow was not reliably extracted." in payload["warnings"]
+
+
+def test_extract_report_assessment_metrics_reads_primary_metrics_table_amounts() -> None:
+    text = """
+    贵州茅台2024年年度报告
+    主要会计数据和财务指标
+    单位：元
+    项目 2024年 2023年 本年比上年增减
+    营业收入 170,899,152,276.34 147,693,604,994.14 15.71%
+    归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38%
+    归属于上市公司股东的扣除非经常性损益的净利润 86,240,905,977.42 74,752,564,425.52 15.37%
+    经营活动产生的现金流量净额 92,463,692,168.43 66,508,744,851.05 39.03%
+    购建固定资产、无形资产和其他长期资产支付的现金 4,676,040,399.80 3,520,447,187.31 32.82%
+    """
+
+    payload = extract_report_assessment_metrics(text, title="贵州茅台2024年年度报告")
+
+    assert payload["report_year"] == 2024
+    assert payload["report_date"] == "2024-12-31"
+    assert payload["deducted_net_profit"] == 86240905977.42
+    assert payload["operating_cash_flow"] == 92463692168.43
+    assert payload["capex_cash_outflow"] == 4676040399.80
+
+
+def test_extract_report_assessment_metrics_reads_cash_flow_statement_lines_with_carried_unit() -> None:
+    text = """
+    宜宾五粮液股份有限公司2024年年度报告
+    合并现金流量表
+    单位：元
+    经营活动产生的现金流量净额 33,939,755,192.78 41,742,479,908.23 -18.69%
+    投资活动现金流入小计 24,089,041.18 25,404,357.88 -5.18%
+    购建固定资产、无形资产和其他长期资产支付的现金 2,666,310,780.23 2,957,236,682.34
+    """
+
+    payload = extract_report_assessment_metrics(text, title="宜宾五粮液股份有限公司2024年年度报告")
+
+    assert payload["operating_cash_flow"] == 33939755192.78
+    assert payload["capex_cash_outflow"] == 2666310780.23
+
+
+def test_extract_report_assessment_metrics_reads_split_capex_line_across_adjacent_rows() -> None:
+    text = """
+    某公司2024年年度报告
+    合并现金流量表
+    单位：元
+    投资活动现金流入小计 24,089,041.18 25,404,357.88
+    购建固定资产、无形资产和其他长期资
+    产支付的现金 2,666,310,780.23 2,957,236,682.34
+    投资支付的现金 1,000,000.00 2,000,000.00
+    """
+
+    payload = extract_report_assessment_metrics(text, title="某公司2024年年度报告")
+
+    assert payload["capex_cash_outflow"] == 2666310780.23
 
 
 def test_build_autoread_llm_excerpt_prefers_three_question_relevant_segments() -> None:
@@ -294,10 +507,11 @@ def test_fetch_report_text_from_url_rejects_redirect_to_non_whitelisted_host(mon
 def test_post_cninfo_disclosure_query_uses_https_headers(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_urlopen(req, timeout: int = 0):  # noqa: ANN001
+    def fake_urlopen(req, timeout: int = 0, context=None):  # noqa: ANN001
         captured["url"] = req.full_url
         captured["origin"] = req.headers.get("Origin")
         captured["referer"] = req.headers.get("Referer")
+        captured["context"] = context
         assert timeout == 12
         return _DummyResponse(b'{"announcements": []}', "application/json; charset=utf-8")
 
@@ -309,3 +523,44 @@ def test_post_cninfo_disclosure_query_uses_https_headers(monkeypatch) -> None:
     assert captured["url"] == "https://www.cninfo.com.cn/new/hisAnnouncement/query"
     assert captured["origin"] == "https://www.cninfo.com.cn"
     assert str(captured["referer"]).startswith("https://www.cninfo.com.cn/")
+    assert captured["context"] is not None
+
+
+def test_load_cninfo_symbol_org_map_uses_verified_ssl_context(monkeypatch) -> None:
+    sentinel_context = object()
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout: int = 0, context=None):  # noqa: ANN001
+        captured["url"] = req.full_url
+        captured["context"] = context
+        assert timeout == 12
+        return _DummyResponse(b'{"stockList":[{"code":"600519","orgId":"gssh0600519"}]}', "application/json; charset=utf-8")
+
+    monkeypatch.setattr(report_service, "_build_verified_ssl_context", lambda: sentinel_context)
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
+
+    payload = report_service._load_cninfo_symbol_org_map()
+
+    assert payload == {"600519": "gssh0600519"}
+    assert captured["url"] == "https://www.cninfo.com.cn/new/data/szse_stock.json"
+    assert captured["context"] is sentinel_context
+
+
+def test_post_cninfo_disclosure_query_uses_verified_ssl_context(monkeypatch) -> None:
+    sentinel_context = object()
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(req, timeout: int = 0, context=None):  # noqa: ANN001
+        captured["url"] = req.full_url
+        captured["context"] = context
+        assert timeout == 12
+        return _DummyResponse(b'{"announcements": []}', "application/json; charset=utf-8")
+
+    monkeypatch.setattr(report_service, "_build_verified_ssl_context", lambda: sentinel_context)
+    monkeypatch.setattr(report_service, "urlopen", fake_urlopen)
+
+    payload = report_service._post_cninfo_disclosure_query({"pageNum": "1"})
+
+    assert payload == {"announcements": []}
+    assert captured["url"] == "https://www.cninfo.com.cn/new/hisAnnouncement/query"
+    assert captured["context"] is sentinel_context
