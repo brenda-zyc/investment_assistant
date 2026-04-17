@@ -241,6 +241,24 @@ def test_answer_report_question_raises_for_missing_cached_context(monkeypatch) -
 def test_answer_report_question_loads_persisted_artifact_when_memory_cache_is_empty(monkeypatch) -> None:
     """Q&A should reload persisted report context when the in-memory cache is empty."""
     report_qa_service.clear_report_context_cache()
+    captured: dict[str, int] = {"mapper_calls": 0}
+
+    def fake_artifact_row_to_context(row):
+        captured["mapper_calls"] += 1
+        assert row["document_url"] == "https://example.com/report.pdf"
+        return {
+            "symbol": "000333",
+            "report": {
+                "title": "2025年年度报告",
+                "document_url": "https://example.com/report.pdf",
+            },
+            "report_text": "annual report text",
+            "answers": [],
+            "llm_analysis": None,
+            "extracted_metrics": {"revenue": 100.0},
+        }
+
+    monkeypatch.setattr(report_qa_service.report_context_service, "artifact_row_to_context", fake_artifact_row_to_context)
     monkeypatch.setattr(
         report_qa_service,
         "fetch_report_artifact",
@@ -272,6 +290,7 @@ def test_answer_report_question_loads_persisted_artifact_when_memory_cache_is_em
     )
 
     assert payload["report_key"] == "000333|https://example.com/report.pdf"
+    assert captured["mapper_calls"] == 1
     cached = report_qa_service.get_cached_report_context("000333|https://example.com/report.pdf")
     assert cached is not None
     assert cached["report"]["title"] == "2025年年度报告"

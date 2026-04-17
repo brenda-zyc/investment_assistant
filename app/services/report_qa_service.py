@@ -8,6 +8,7 @@ from typing import Any
 
 from app.db import fetch_report_artifact
 from app.services.llm_service import answer_report_question_with_llm
+from app.services import report_context_service
 
 
 REPORT_CONTEXT_CACHE_MAX_ENTRIES = 8
@@ -127,15 +128,7 @@ logger = logging.getLogger(__name__)
 
 def build_report_key(symbol: str, report: dict[str, Any] | None) -> str | None:
     """Build a stable cache key for one active report context."""
-    symbol_text = str(symbol or "").strip()
-    if not symbol_text or not report:
-        return None
-
-    source_url = report.get("document_url") or report.get("detail_url")
-    source_text = str(source_url or "").strip()
-    if not source_text:
-        return None
-    return f"{symbol_text}|{source_text}"
+    return report_context_service.build_report_key(symbol, report)
 
 
 def clear_report_context_cache() -> None:
@@ -163,21 +156,7 @@ def get_cached_report_context(report_key: str) -> dict[str, Any] | None:
 
 def _context_from_artifact(row: dict[str, Any]) -> dict[str, Any]:
     """Rebuild the report-Q&A context shape from one persisted artifact row."""
-    return {
-        "symbol": row.get("symbol"),
-        "report": {
-            "title": row.get("title"),
-            "published_at": row.get("published_at"),
-            "detail_url": row.get("detail_url"),
-            "document_url": row.get("document_url"),
-            "content_type": row.get("content_type"),
-            "pdf_pages": row.get("pdf_pages"),
-        },
-        "report_text": row.get("report_text"),
-        "extracted_metrics": row.get("extracted_metrics") or {},
-        "answers": row.get("answers") or [],
-        "llm_analysis": row.get("llm_analysis"),
-    }
+    return report_context_service.artifact_row_to_context(row)
 
 
 def _normalize_history_turn(item: dict[str, Any]) -> dict[str, str] | None:
