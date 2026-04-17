@@ -11,6 +11,7 @@ TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "app" / "templates" / "ind
 INDEX_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "index.js"
 REPORT_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "report.js"
 STOCK_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "stock.js"
+INDUSTRY_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "industry.js"
 
 
 def _template_source() -> str:
@@ -27,6 +28,10 @@ def _report_js_source() -> str:
 
 def _stock_js_source() -> str:
     return STOCK_JS_PATH.read_text(encoding="utf-8")
+
+
+def _industry_js_source() -> str:
+    return INDUSTRY_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -320,6 +325,17 @@ def test_stock_js_module_exists() -> None:
     assert STOCK_JS_PATH.exists()
 
 
+def test_index_js_imports_industry_module() -> None:
+    source = _index_js_source()
+
+    assert 'from "./industry.js"' in source
+    assert "setupIndustryModule(" in source
+
+
+def test_industry_js_module_exists() -> None:
+    assert INDUSTRY_JS_PATH.exists()
+
+
 def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
     source = _stock_js_source()
 
@@ -396,7 +412,7 @@ def test_report_url_helper_copy_is_limited_to_official_disclosure_links() -> Non
 def test_dashboard_template_includes_external_data_reference_section() -> None:
     """Dashboard UI should expose the external-data table and render rows from industry payloads."""
     source = _template_source()
-    js_source = _index_js_source()
+    js_source = _industry_js_source()
 
     assert 'id="externalDataTable"' in source
     assert 'id="externalDataStatus"' in source
@@ -414,7 +430,7 @@ def test_dashboard_template_includes_external_data_reference_section() -> None:
 
 def test_load_industry_cycles_does_not_touch_external_reference_table() -> None:
     """Industry refresh should not clear or rerender the external reference table."""
-    source = _index_js_source()
+    source = _industry_js_source()
     body = _function_body(source, "async function loadIndustryCycles()")
 
     assert 'loadIndustryBtn.disabled = true;' in body
@@ -427,7 +443,7 @@ def test_load_industry_cycles_does_not_touch_external_reference_table() -> None:
 
 def test_load_cached_industry_cycles_reads_cache_and_renders_both_tables() -> None:
     """Initial industry-tab load should read cached data and render both tables."""
-    source = _index_js_source()
+    source = _industry_js_source()
     body = _function_body(source, "async function loadCachedIndustryCycles()")
 
     assert "/industry_cycles?refresh=false&refresh_external=false" in body
@@ -438,7 +454,7 @@ def test_load_cached_industry_cycles_reads_cache_and_renders_both_tables() -> No
 
 def test_refresh_external_data_uses_dedicated_status_element() -> None:
     """External refresh should update only the external-data status text."""
-    source = _index_js_source()
+    source = _industry_js_source()
     body = _function_body(source, "async function refreshExternalDataReferences()")
 
     assert 'refreshExternalDataBtn.disabled = true;' in body
@@ -450,7 +466,7 @@ def test_refresh_external_data_uses_dedicated_status_element() -> None:
 
 def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
     """Cached fallback rows should render as warning badges instead of hard failures."""
-    source = _index_js_source()
+    source = _industry_js_source()
     body = _function_body(source, "function renderExternalDataReferences(rows)")
 
     assert 'row.status === "cached"' in body
@@ -460,7 +476,7 @@ def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
 def test_industry_table_uses_indicator_as_of_column_label() -> None:
     """Industry table should clarify that each row carries its own observation date."""
     source = _template_source()
-    js_source = _index_js_source()
+    js_source = _industry_js_source()
 
     assert "<th>Indicator As Of</th>" in source
 
@@ -471,7 +487,7 @@ def test_industry_table_uses_indicator_as_of_column_label() -> None:
 def test_industry_table_renders_source_links_from_payload() -> None:
     """Industry rows should render upstream links without hardcoding source-specific URL logic in the template."""
     source = _template_source()
-    js_source = _index_js_source()
+    js_source = _industry_js_source()
 
     assert "<th>Link</th>" in source
     body = _function_body(js_source, "function renderIndustryRows(rows)")
@@ -481,14 +497,14 @@ def test_industry_table_renders_source_links_from_payload() -> None:
 
 def test_industry_table_prefers_display_name_over_internal_key() -> None:
     """Industry rows should render human-readable indicator labels in the table."""
-    body = _function_body(_index_js_source(), "function renderIndustryRows(rows)")
+    body = _function_body(_industry_js_source(), "function renderIndustryRows(rows)")
 
     assert "${row.display_name ?? row.indicator ?? \"-\"}" in body
 
 
 def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> None:
     """Live industry refresh should not clear the table before the new payload arrives."""
-    source = _index_js_source()
+    source = _industry_js_source()
     body = _function_body(source, "async function loadIndustryCycles()")
 
     assert 'industryStatusEl.textContent = "Loading industry cycles...";' in body
@@ -497,7 +513,7 @@ def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> No
 
 def test_industry_status_text_mentions_refreshed_at_timestamp() -> None:
     """Industry status text should distinguish indicator dates from the current refresh time."""
-    source = _index_js_source()
+    source = _industry_js_source()
     load_body = _function_body(source, "async function loadIndustryCycles()")
     cached_body = _function_body(source, "async function loadCachedIndustryCycles()")
 
