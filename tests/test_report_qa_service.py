@@ -1,8 +1,40 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import app.services.report_qa_service as report_qa_service
+
+
+def ask_and_append(
+    history: list[dict[str, object]],
+    question: str,
+    *,
+    session_summary: str,
+    symbol: str,
+    report_key: str,
+    use_llm: bool,
+) -> tuple[dict[str, object], str]:
+    """Call the report-QA entrypoint and append the resulting user/assistant turns back into history."""
+    payload = report_qa_service.answer_report_question(
+        symbol=symbol,
+        report_key=report_key,
+        question=question,
+        history=cast(list[dict[str, Any]], history),
+        session_summary=session_summary,
+        use_llm=use_llm,
+    )
+    history.append({"role": "user", "content": question})
+    history.append(
+        {
+            "role": "assistant",
+            "content": payload["short_answer"],
+            "evidence": payload.get("evidence", []),
+            "citations": payload.get("citations", []),
+            "mode": payload.get("mode"),
+        }
+    )
+    return payload, str(payload.get("updated_session_summary") or session_summary)
 
 
 def test_build_report_key_prefers_document_url() -> None:
@@ -152,6 +184,76 @@ def test_bound_history_keeps_last_six_turns_and_merges_older_turns_into_summary(
     assert "older summary" in updated_summary
     assert "q0" in updated_summary
     assert "a0" in updated_summary
+
+
+def test_report_qa_rule_only_dialogue_flow() -> None:
+    """Rule-only dialogue should answer each turn with the right kind of fresh report-grounded detail."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|rule-dialogue",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://example.com/rule-dialogue.pdf"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "扣非净利润和净利润分别为多少？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么你认为净利润较为真实？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "今年利润增长主要来自哪里？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+
+    assert q1["mode"] == "rule_fallback"
+    assert "扣非净利润约862.41亿元" in q1["short_answer"]
+    assert "净利润约862.28亿元" in q1["short_answer"]
+    assert q2["mode"] == "rule_fallback"
+    assert "经营现金流" in q2["short_answer"]
+    assert "扣非净利润" in q2["short_answer"]
+    assert q3["mode"] == "rule_fallback"
+    assert "销量增加" in q3["short_answer"]
+    assert "价格调整" in q3["short_answer"]
 
 
 def test_answer_report_question_returns_rule_fallback_without_llm() -> None:
