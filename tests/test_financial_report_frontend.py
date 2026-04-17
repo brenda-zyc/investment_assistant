@@ -10,6 +10,7 @@ from app.main import app
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html"
 INDEX_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "index.js"
 REPORT_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "report.js"
+STOCK_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "stock.js"
 
 
 def _template_source() -> str:
@@ -22,6 +23,10 @@ def _index_js_source() -> str:
 
 def _report_js_source() -> str:
     return REPORT_JS_PATH.read_text(encoding="utf-8")
+
+
+def _stock_js_source() -> str:
+    return STOCK_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -232,7 +237,7 @@ def test_stock_and_report_requests_include_refresh_flags_when_requested() -> Non
 
 
 def test_analyze_single_stock_renders_cached_tables_without_triggering_new_realtime_fetch() -> None:
-    source = _index_js_source()
+    source = _stock_js_source()
     body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
 
     assert "Promise.all([" not in body
@@ -240,13 +245,15 @@ def test_analyze_single_stock_renders_cached_tables_without_triggering_new_realt
     assert "renderFinancialRows(currentFinancialRows);" in body
     assert "maybeLoadMetricPanel();" in body
     assert "void loadSingleStockRealtime();" not in body
-    assert 'refresh\n              ? "Realtime quote will update on the next background refresh."\n              : "Using historical latest close until background realtime refresh."' in body
+    assert "realtimeStatusEl.textContent =" in body
+    assert '"Realtime quote will update on the next background refresh."' in body
+    assert '"Using historical latest close until background realtime refresh."' in body
     assert "if (latestRealtimeSnapshotData) {" in body
     assert "applyCachedSingleRealtimeSnapshot();" in body
 
 
 def test_async_single_stock_helpers_exist_for_metric_and_realtime_enrichment() -> None:
-    source = _index_js_source()
+    source = _stock_js_source()
 
     lazy_metric_body = _function_body(source, "function maybeLoadMetricPanel()")
     metric_body = _function_body(source, "async function loadStockMetricPanel(symbol)")
@@ -263,7 +270,7 @@ def test_async_single_stock_helpers_exist_for_metric_and_realtime_enrichment() -
 
 
 def test_analyze_watchlist_renders_cached_rows_without_triggering_new_realtime_fetch() -> None:
-    source = _index_js_source()
+    source = _stock_js_source()
     body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
 
     assert "renderWatchlistRows(rows);" in body
@@ -298,14 +305,24 @@ def test_index_js_imports_report_module() -> None:
     assert "setupReportModule(" in source
 
 
+def test_index_js_imports_stock_module() -> None:
+    source = _index_js_source()
+
+    assert 'from "./stock.js"' in source
+    assert "setupStockModule(" in source
+
+
 def test_report_js_module_exists() -> None:
     assert REPORT_JS_PATH.exists()
 
 
-def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
-    source = _index_js_source()
+def test_stock_js_module_exists() -> None:
+    assert STOCK_JS_PATH.exists()
 
-    assert "async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 5000, errorLabel = \"Backend\")" in source
+
+def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
+    source = _stock_js_source()
+
     shared_realtime_body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
     watchlist_name_body = _function_body(source, "async function loadWatchlistNames(symbols, requestToken)")
 
@@ -322,12 +339,13 @@ def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
 
 
 def test_metric_panel_lazy_loads_on_accordion_open() -> None:
-    source = _index_js_source()
+    stock_source = _stock_js_source()
+    index_source = _index_js_source()
 
-    assert "const metricAccordionToggleEl = document.querySelector('[aria-controls=\"metricAccordionBody\"]');" in source
-    assert "let stockMetricLoadedSymbol = null;" in source
-    assert "let stockMetricLoadingSymbol = null;" in source
-    accordion_body = _function_body(source, "buttonEl.addEventListener(\"click\", () =>")
+    assert "const metricAccordionToggleEl = document.querySelector('[aria-controls=\"metricAccordionBody\"]');" in stock_source
+    assert "let stockMetricLoadedSymbol = null;" in stock_source
+    assert "let stockMetricLoadingSymbol = null;" in stock_source
+    accordion_body = _function_body(index_source, "buttonEl.addEventListener(\"click\", () =>")
 
     assert 'if (bodyId === "metricAccordionBody" && !isExpanded) {' in accordion_body
     assert "maybeLoadMetricPanel();" in accordion_body
@@ -335,14 +353,15 @@ def test_metric_panel_lazy_loads_on_accordion_open() -> None:
 
 def test_warning_summaries_use_short_labels_in_status_text() -> None:
     source = _index_js_source()
+    stock_source = _stock_js_source()
 
     assert "function summarizeWarnings(warnings)" in source
     assert 'return summarized.length ? ` Warnings: ${summarized.join(" | ")}` : "";' in source
-    assert "const warningText = summarizeWarnings(data.warnings || []);" in source
+    assert "const warningText = summarizeWarnings(data.warnings || []);" in stock_source
 
 
 def test_realtime_polling_skips_hidden_tabs_and_overlapping_requests() -> None:
-    source = _index_js_source()
+    source = _stock_js_source()
     body = _function_body(source, "async function refreshRealtimePrices()")
 
     assert "let realtimeRefreshInFlight = false;" in source
@@ -357,7 +376,7 @@ def test_realtime_polling_skips_hidden_tabs_and_overlapping_requests() -> None:
 
 
 def test_shared_realtime_scheduler_batches_requests_and_replays_queued_symbols() -> None:
-    source = _index_js_source()
+    source = _stock_js_source()
     body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
 
     assert "queuedRealtimeSymbols.add(symbol);" in body
