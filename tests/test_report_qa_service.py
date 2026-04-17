@@ -432,6 +432,97 @@ def test_report_qa_follow_up_dialogue_flow() -> None:
     assert "please specify which part" in q4["short_answer"].lower()
 
 
+def test_report_qa_scope_boundary_dialogue_flow(monkeypatch) -> None:
+    """Out-of-report turns should switch to general LLM mode without overwriting report-session state."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|scope-dialogue",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://example.com/scope-dialogue.pdf"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    out_of_scope_responses = iter(
+        [
+            {"short_answer": "估值是否偏贵要结合当前价格、增长预期和市场风险偏好综合判断。"},
+            {"short_answer": "行业景气度需要看需求、价格和库存周期，不能只靠年报单点判断。"},
+        ]
+    )
+
+    monkeypatch.setattr(
+        report_qa_service,
+        "answer_general_question_with_llm",
+        lambda **_: next(out_of_scope_responses),
+        raising=False,
+    )
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+    q1, session_summary = ask_and_append(
+        history,
+        "净利润是否为真？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "那现在估值贵不贵？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=True,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "行业景气度怎么样？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=True,
+    )
+    q4, session_summary = ask_and_append(
+        history,
+        "为什么你这么判断净利润？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=False,
+    )
+
+    assert q1["mode"] in {"rule_fallback", "llm_hybrid"}
+    assert q2["mode"] == "out_of_report_llm"
+    assert q3["mode"] == "out_of_report_llm"
+    assert q2["updated_session_summary"] == q1["updated_session_summary"]
+    assert q3["updated_session_summary"] == q1["updated_session_summary"]
+    assert q4["mode"] in {"rule_fallback", "llm_hybrid"}
+    assert q4["short_answer"] != q2["short_answer"]
+    assert q4["short_answer"] != q3["short_answer"]
+    assert any(token in q4["short_answer"] for token in ("利润", "现金流", "扣非"))
+
+
 def test_answer_report_question_returns_rule_fallback_without_llm() -> None:
     """When LLM usage is disabled, the service should return a constrained fallback answer."""
     report_qa_service.clear_report_context_cache()
