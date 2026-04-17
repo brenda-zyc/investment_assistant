@@ -256,6 +256,182 @@ def test_report_qa_rule_only_dialogue_flow() -> None:
     assert "价格调整" in q3["short_answer"]
 
 
+def test_report_qa_llm_hybrid_dialogue_flow(monkeypatch) -> None:
+    """Hybrid dialogue should clean repeated support and fall back to report rules when the LLM stops helping."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|hybrid-dialogue",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://example.com/hybrid-dialogue.pdf"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    responses = iter(
+        [
+            {
+                "short_answer": "扣非净利润为862.41亿元，净利润为862.28亿元。",
+                "evidence": [
+                    "扣非净利润与净利润口径接近。",
+                    "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                ],
+                "citations": [
+                    {
+                        "source": "report_text",
+                        "snippet": "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                    }
+                ],
+                "confidence": "high",
+            },
+            {
+                "short_answer": "净利润较为真实，主要因为经营现金流与净利润匹配度高，且扣非净利润与净利润基本一致。",
+                "evidence": [
+                    "经营现金流/净利润 = 1.07x。",
+                    "扣非净利润/净利润 = 1.00x。",
+                ],
+                "citations": [
+                    {"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"},
+                    {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62元。"},
+                ],
+                "confidence": "high",
+            },
+            {},
+        ]
+    )
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", lambda **_: next(responses))
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+    q1, session_summary = ask_and_append(
+        history,
+        "扣非净利润和净利润分别为多少？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么你认为净利润较为真实？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "今年利润增长主要来自哪里？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+
+    assert q1["mode"] == "llm_hybrid"
+    assert q1["citations"]
+    assert q2["mode"] == "llm_hybrid"
+    assert q2["short_answer"] != q1["short_answer"]
+    assert q2["evidence"] != q1["evidence"]
+    assert any("经营现金流" in item for item in q2["evidence"] + [citation["snippet"] for citation in q2["citations"]])
+    assert q3["mode"] == "rule_fallback"
+    assert "销量增加" in q3["short_answer"]
+
+
+def test_report_qa_follow_up_dialogue_flow() -> None:
+    """Weak follow-ups should stay anchored until there is no usable report-scoped question left."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        "600519|follow-up-dialogue",
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": "https://example.com/follow-up-dialogue.pdf"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "经营现金流和净利润匹配吗？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么这么说？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=False,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "也没有展开呀",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=False,
+    )
+    q4 = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        question="展开一点",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert q1["mode"] == "rule_fallback"
+    assert q2["mode"] in {"rule_fallback", "llm_hybrid"}
+    assert q3["mode"] in {"rule_fallback", "llm_hybrid"}
+    assert q4["mode"] == "rule_fallback"
+    assert "please specify which part" in q4["short_answer"].lower()
+
+
 def test_answer_report_question_returns_rule_fallback_without_llm() -> None:
     """When LLM usage is disabled, the service should return a constrained fallback answer."""
     report_qa_service.clear_report_context_cache()
