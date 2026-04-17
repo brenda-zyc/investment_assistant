@@ -12,6 +12,7 @@ INDEX_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / 
 REPORT_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "report.js"
 STOCK_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "stock.js"
 INDUSTRY_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "industry.js"
+MACRO_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "macro.js"
 
 
 def _template_source() -> str:
@@ -32,6 +33,10 @@ def _stock_js_source() -> str:
 
 def _industry_js_source() -> str:
     return INDUSTRY_JS_PATH.read_text(encoding="utf-8")
+
+
+def _macro_js_source() -> str:
+    return MACRO_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -334,6 +339,40 @@ def test_index_js_imports_industry_module() -> None:
 
 def test_industry_js_module_exists() -> None:
     assert INDUSTRY_JS_PATH.exists()
+
+
+def test_index_js_imports_macro_module() -> None:
+    source = _index_js_source()
+
+    assert 'from "./macro.js"' in source
+    assert "setupMacroModule(" in source
+
+
+def test_macro_js_module_exists() -> None:
+    assert MACRO_JS_PATH.exists()
+
+
+def test_macro_module_loads_rows_and_signals_together() -> None:
+    source = _macro_js_source()
+    body = _function_body(source, "async function loadMacroIndicators()")
+
+    assert "/api/macro-indicators?table=" in body
+    assert "/macro_signals?table=" in body
+    assert "Promise.all([fetch(rowsUrl), fetch(signalsUrl)])" in body
+    assert "renderMacroRows(viewRows);" in body
+    assert "renderMacroSignals(signalData || []);" in body
+    assert "renderValuationPanel(signalData || []);" in body
+
+
+def test_macro_module_supports_fill_missing_and_valuation_empty_state() -> None:
+    source = _macro_js_source()
+
+    assert "function fillMissingValues(rows)" in source
+    assert "function buildMissingHint(rows)" in source
+    assert 'macroFillMissing.addEventListener("change", () =>' in source
+    assert 'macroHintEl.textContent = "No rows found in selected table/limit."; ' not in source
+    assert 'macroHintEl.textContent = "No rows found in selected table/limit.";' in source
+    assert "No Data" in source
 
 
 def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
