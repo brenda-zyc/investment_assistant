@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import app.services.report_qa_service as report_qa_service
+import app.services.report_context_service as report_context_service
 from app.usecases import financial_report_usecase
 
 
@@ -371,6 +372,76 @@ def test_analyze_financial_report_url_returns_report_key_and_caches_context(monk
     assert snapshot_items["roe"]["display_unit"] == "percent"
 
 
+def test_persist_report_artifact_rehydrates_hot_cache_via_shared_mapper(monkeypatch) -> None:
+    """Persisted artifacts should rehydrate the hot cache using the shared context mapper."""
+    report_qa_service.clear_report_context_cache()
+    captured_row: dict[str, object] = {}
+    mapper_calls: list[str] = []
+    original_row_mapper = report_context_service.artifact_row_from_context
+    original_context_mapper = report_context_service.context_from_artifact_row
+
+    def fake_upsert_report_artifact(row):
+        captured_row.update(row)
+
+    def fake_artifact_row_from_context(**kwargs):
+        mapper_calls.append("artifact_row_from_context")
+        row = original_row_mapper(**kwargs)
+        row["parsed_at"] = "2026-04-17T16:30:00+00:00"
+        return row
+
+    def fake_context_from_artifact_row(row):
+        mapper_calls.append("context_from_artifact_row")
+        return original_context_mapper(row)
+
+    monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", fake_upsert_report_artifact)
+    monkeypatch.setattr(
+        financial_report_usecase.report_context_service,
+        "artifact_row_from_context",
+        fake_artifact_row_from_context,
+    )
+    monkeypatch.setattr(
+        financial_report_usecase.report_context_service,
+        "context_from_artifact_row",
+        fake_context_from_artifact_row,
+    )
+
+    report_key = financial_report_usecase._persist_report_artifact(
+        symbol="000333",
+        report={
+            "title": "2025年年度报告",
+            "published_at": "2026-03-28 20:00:00",
+            "detail_url": "https://example.com/detail",
+            "document_url": "https://example.com/report.pdf",
+            "content_type": "application/pdf",
+            "pdf_pages": 188,
+        },
+        report_text="annual report text",
+        extracted_metrics={"revenue": 100.0},
+        answers=[{"question": "q1", "summary": "a1"}],
+        llm_analysis={"summary": "llm note"},
+    )
+
+    assert report_key == "000333|https://example.com/report.pdf"
+    assert mapper_calls == ["artifact_row_from_context", "context_from_artifact_row"]
+    assert captured_row["report_key"] == report_key
+    assert captured_row["symbol"] == "000333"
+    assert captured_row["document_url"] == "https://example.com/report.pdf"
+    assert captured_row["detail_url"] == "https://example.com/detail"
+    assert captured_row["title"] == "2025年年度报告"
+    assert captured_row["content_type"] == "application/pdf"
+    assert captured_row["pdf_pages"] == 188
+    assert captured_row["report_text"] == "annual report text"
+    assert captured_row["extracted_metrics"]["revenue"] == 100.0
+    assert captured_row["extracted_metrics"]["extraction_version"] == financial_report_usecase.REPORT_EXTRACTION_VERSION
+    assert captured_row["current_mode"] == report_context_service.REPORT_TEXT_EXTRACTED_MODE
+    assert captured_row["parsed_at"] == "2026-04-17T16:30:00+00:00"
+
+    cached_context = report_qa_service.get_cached_report_context(report_key)
+    assert cached_context == original_context_mapper(captured_row)
+    assert cached_context["report"]["document_url"] == "https://example.com/report.pdf"
+    assert cached_context["answers"] == [{"question": "q1", "summary": "a1"}]
+
+
 def test_analyze_financial_report_url_returns_none_report_key_when_report_text_is_empty(monkeypatch) -> None:
     """URL analysis should not advertise a report key when no active context was cached."""
     report_qa_service.clear_report_context_cache()
@@ -651,6 +722,18 @@ def test_financial_report_autoread_ignores_current_url_analysis_artifact_for_sam
 def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refresh_false(monkeypatch) -> None:
     """URL analysis should return a persisted artifact when the report key already exists."""
     report_qa_service.clear_report_context_cache()
+    captured: dict[str, int] = {"mapper_calls": 0}
+    original_context_mapper = report_context_service.context_from_artifact_row
+
+    def fake_context_from_artifact_row(row):
+        captured["mapper_calls"] += 1
+        return original_context_mapper(row)
+
+    monkeypatch.setattr(
+        financial_report_usecase.report_context_service,
+        "context_from_artifact_row",
+        fake_context_from_artifact_row,
+    )
     monkeypatch.setattr(
         financial_report_usecase,
         "fetch_report_artifact",
@@ -693,6 +776,10 @@ def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refres
 
     assert payload["report_key"] == "000333|https://static.cninfo.com.cn/report.pdf"
     assert payload["extracted"]["revenue"] == 100.0
+    assert captured["mapper_calls"] == 1
+    cached_context = report_qa_service.get_cached_report_context(payload["report_key"])
+    assert cached_context is not None
+    assert cached_context["report"]["document_url"] == "https://static.cninfo.com.cn/report.pdf"
 
 
 def test_analyze_financial_report_url_refreshes_stale_artifact_without_current_extraction_version(monkeypatch) -> None:

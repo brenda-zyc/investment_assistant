@@ -20,8 +20,9 @@ from app.services.financial_report_service import (
     fetch_report_text_from_url,
     find_latest_annual_report,
 )
-from app.services.report_qa_service import build_report_key, store_report_context
+from app.services import report_context_service
 from app.services.report_qa_service import answer_report_question as answer_report_question_service
+from app.services.report_qa_service import store_report_context
 from app.services.llm_service import get_effective_llm_config, interpret_annual_report_text
 from app.services.market_data_service import (
     fetch_financial_summary,
@@ -306,7 +307,7 @@ def analyze_financial_report_url(
 ) -> dict:
     """Analyze a Chinese financial report link and return extracted metrics."""
     report_stub = {"document_url": url, "detail_url": None}
-    report_key = build_report_key(symbol, report_stub) if symbol else None
+    report_key = report_context_service.build_report_key(symbol, report_stub) if symbol else None
     if report_key and not force_refresh:
         artifact_row = fetch_report_artifact(report_key)
         if artifact_row and _artifact_has_current_extraction_version(artifact_row):
@@ -488,25 +489,6 @@ def _build_url_analysis_payload(
     return analysis_payload
 
 
-def _report_context_from_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Reconstruct the in-memory Q&A context shape from one persisted artifact row."""
-    return {
-        "symbol": row.get("symbol"),
-        "report": {
-            "title": row.get("title"),
-            "published_at": row.get("published_at"),
-            "detail_url": row.get("detail_url"),
-            "document_url": row.get("document_url"),
-            "content_type": row.get("content_type"),
-            "pdf_pages": row.get("pdf_pages"),
-        },
-        "report_text": row.get("report_text"),
-        "extracted_metrics": row.get("extracted_metrics") or {},
-        "answers": row.get("answers") or [],
-        "llm_analysis": row.get("llm_analysis"),
-    }
-
-
 def _artifact_row(
     *,
     symbol: str | None,
@@ -520,29 +502,20 @@ def _artifact_row(
     if not symbol or not report_text:
         return None
 
-    report_key = build_report_key(symbol, report)
-    if not report_key:
+    row = report_context_service.artifact_row_from_context(
+        symbol=symbol,
+        report=report,
+        report_text=report_text,
+        extracted_metrics=extracted_metrics,
+        answers=answers,
+        llm_analysis=llm_analysis,
+        extraction_version=REPORT_EXTRACTION_VERSION,
+        is_historical_fallback=not _has_usable_report_metrics(extracted_metrics),
+        now=dt.datetime.now(dt.UTC),
+    )
+    if not row:
         return None
-
-    return {
-        "report_key": report_key,
-        "symbol": symbol,
-        "document_url": (report or {}).get("document_url"),
-        "detail_url": (report or {}).get("detail_url"),
-        "title": (report or {}).get("title"),
-        "published_at": (report or {}).get("published_at"),
-        "content_type": (report or {}).get("content_type"),
-        "pdf_pages": (report or {}).get("pdf_pages"),
-        "report_text": report_text,
-        "extracted_metrics": {
-            **(extracted_metrics or {}),
-            "extraction_version": REPORT_EXTRACTION_VERSION,
-        },
-        "answers": answers or [],
-        "llm_analysis": llm_analysis,
-        "current_mode": "report_text_extracted" if _has_usable_report_metrics(extracted_metrics) else "historical_fallback",
-        "parsed_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-    }
+    return row
 
 
 def _store_hot_report_context_from_artifact(row: dict[str, Any]) -> None:
@@ -550,7 +523,7 @@ def _store_hot_report_context_from_artifact(row: dict[str, Any]) -> None:
     report_key = str(row.get("report_key") or "").strip()
     if not report_key:
         return
-    store_report_context(report_key, _report_context_from_artifact_row(row))
+    store_report_context(report_key, report_context_service.context_from_artifact_row(row))
 
 
 def _persist_report_artifact(
