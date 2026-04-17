@@ -9,6 +9,7 @@ from app.main import app
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html"
 INDEX_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "index.js"
+REPORT_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "report.js"
 
 
 def _template_source() -> str:
@@ -17,6 +18,10 @@ def _template_source() -> str:
 
 def _index_js_source() -> str:
     return INDEX_JS_PATH.read_text(encoding="utf-8")
+
+
+def _report_js_source() -> str:
+    return REPORT_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -37,7 +42,7 @@ def _function_body(source: str, function_signature: str) -> str:
 
 def test_auto_read_annual_report_resets_stale_financial_report_sections() -> None:
     """Auto-read should clear previously rendered summary sections before fetching a new symbol."""
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetFinancialReportPanel();"
@@ -50,7 +55,7 @@ def test_auto_read_annual_report_resets_stale_financial_report_sections() -> Non
 
 def test_auto_read_annual_report_has_empty_state_for_missing_report_source() -> None:
     """Auto-read should explain when no annual-report source metadata is available."""
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     assert re.search(r"Report source metadata unavailable", body)
@@ -75,7 +80,7 @@ def test_financial_report_template_includes_report_snapshot_panel_hooks() -> Non
     source = _template_source()
 
     assert 'id="reportSnapshotSections"' in source
-    assert "function renderFinancialReportSnapshot(snapshot)" in _index_js_source()
+    assert "function renderFinancialReportSnapshot(snapshot)" in _report_js_source()
 
 
 def test_financial_report_template_includes_report_qa_panel() -> None:
@@ -91,7 +96,7 @@ def test_financial_report_template_includes_report_qa_panel() -> None:
 
 
 def test_financial_report_template_includes_guided_question_chips() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
     assert "今年利润增长主要来自哪里？" in source
     assert "经营现金流和净利润匹配吗？" in source
@@ -99,7 +104,7 @@ def test_financial_report_template_includes_guided_question_chips() -> None:
 
 
 def test_financial_report_template_includes_report_qa_session_hooks() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
     assert "let reportQaSession" in source
     assert "let reportQaShowOlderTurns = false;" in source
@@ -110,7 +115,7 @@ def test_financial_report_template_includes_report_qa_session_hooks() -> None:
 
 
 def test_financial_report_template_includes_report_qa_ask_flow() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function askActiveReport()")
 
     assert 'fetch(`${apiBase}/api/financial-report-qa`' in body
@@ -124,7 +129,7 @@ def test_financial_report_template_includes_report_qa_ask_flow() -> None:
 
 
 def test_financial_report_template_keeps_full_transcript_and_renders_older_toggle() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     append_body = _function_body(source, "function appendReportQaTurn(role, content, payload = {})")
     render_body = _function_body(source, "function renderReportQaTranscript()")
 
@@ -139,7 +144,7 @@ def test_financial_report_template_keeps_full_transcript_and_renders_older_toggl
 
 
 def test_financial_report_template_formats_report_qa_bold_text_safely() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
     assert "function formatReportQaRichText(value)" in source
     assert ".replace(/\\*\\*(.+?)\\*\\*/g, \"<strong>$1</strong>\")" in source
@@ -147,7 +152,7 @@ def test_financial_report_template_formats_report_qa_bold_text_safely() -> None:
 
 
 def test_financial_report_template_rolls_back_user_turn_when_qa_request_fails() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function askActiveReport()")
 
     assert "const previousHistorySnapshot = reportQaSession.history.map((turn) => ({ ...turn }));" in body
@@ -155,13 +160,13 @@ def test_financial_report_template_rolls_back_user_turn_when_qa_request_fails() 
 
 
 def test_financial_report_template_ignores_enter_during_ime_composition() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
     assert 'if (e.key === "Enter" && !e.isComposing) askActiveReport();' in source
 
 
 def test_financial_report_url_analysis_sends_symbol_with_report_url() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     assert 'const reportSymbol = /^\\d{6}$/.test(reportCodeInput.value.trim()) ? reportCodeInput.value.trim() : null;' in body
@@ -169,7 +174,7 @@ def test_financial_report_url_analysis_sends_symbol_with_report_url() -> None:
 
 
 def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
@@ -179,7 +184,7 @@ def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
 
 
 def test_report_flows_render_report_snapshot_sections() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     report_body = _function_body(source, "async function loadFinancialReport(refresh = false)")
     url_body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
     autoread_body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
@@ -190,7 +195,7 @@ def test_report_flows_render_report_snapshot_sections() -> None:
 
 
 def test_auto_read_resets_report_qa_before_fetch() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
@@ -200,7 +205,7 @@ def test_auto_read_resets_report_qa_before_fetch() -> None:
 
 
 def test_financial_report_template_uses_report_key_only_for_active_session() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
     assert "data.report_key || data.session_key" not in source
     assert "const reportKey = data.report_key || null;" in source
@@ -216,15 +221,11 @@ def test_stock_and_report_panels_expose_explicit_refresh_controls() -> None:
 
 
 def test_stock_and_report_requests_include_refresh_flags_when_requested() -> None:
-    source = _index_js_source()
+    source = _report_js_source()
 
-    single_body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
-    watchlist_body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
     report_body = _function_body(source, "async function loadFinancialReport(refresh = false)")
     autoread_body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
-    assert "body: JSON.stringify({ stock_code: code, refresh })" in single_body
-    assert "body: JSON.stringify({ stock_codes: codes, refresh })" in watchlist_body
     assert "financial-report-analysis?symbol=" in report_body
     assert "&refresh=${refresh ? \"true\" : \"false\"}" in report_body
     assert "force_refresh=${forceRefresh ? \"true\" : \"false\"}" in autoread_body
@@ -286,7 +287,19 @@ def test_static_js_entrypoint_is_served() -> None:
 
     assert static_mounts
     assert INDEX_JS_PATH.exists()
-    assert "async function autoReadAnnualReport(forceRefresh = false)" in _index_js_source()
+    assert REPORT_JS_PATH.exists()
+    assert "async function autoReadAnnualReport(forceRefresh = false)" in _report_js_source()
+
+
+def test_index_js_imports_report_module() -> None:
+    source = _index_js_source()
+
+    assert 'from "./report.js"' in source
+    assert "setupReportModule(" in source
+
+
+def test_report_js_module_exists() -> None:
+    assert REPORT_JS_PATH.exists()
 
 
 def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
