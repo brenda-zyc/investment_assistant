@@ -1,4 +1,4 @@
-export function setupStockModule({
+import {
   apiBase,
   classifyWarningMessage,
   summarizeWarnings,
@@ -7,6 +7,9 @@ export function setupStockModule({
   isBackendUnreachable,
   parseJsonResponse,
   fetchJsonWithTimeout,
+} from "./core.js";
+
+export function setupStockModule({
   dom: {
     analyzeBtn,
     refreshSingleStockBtn,

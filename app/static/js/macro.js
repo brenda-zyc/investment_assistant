@@ -1,8 +1,6 @@
+import { apiBase, formatNumber, isBackendUnreachable, parseJsonResponse } from "./core.js";
+
 export function setupMacroModule({
-  apiBase,
-  formatNumber,
-  isBackendUnreachable,
-  parseJsonResponse,
   dom: {
     macroTableSelect,
     macroLimitInput,

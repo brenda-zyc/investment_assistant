@@ -1,4 +1,4 @@
-export function setupReportModule({
+import {
   apiBase,
   summarizeWarnings,
   formatNumber,
@@ -7,6 +7,9 @@ export function setupReportModule({
   escapeHtmlAttribute,
   isBackendUnreachable,
   parseJsonResponse,
+} from "./core.js";
+
+export function setupReportModule({
   dom: {
     reportCodeInput,
     loadReportBtn,

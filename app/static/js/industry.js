@@ -1,10 +1,13 @@
-export function setupIndustryModule({
+import {
   apiBase,
   summarizeWarnings,
   formatNumber,
   escapeHtmlAttribute,
   isBackendUnreachable,
   parseJsonResponse,
+} from "./core.js";
+
+export function setupIndustryModule({
   dom: {
     externalDataTableBody,
     externalDataStatusEl,

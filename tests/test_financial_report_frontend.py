@@ -13,6 +13,7 @@ REPORT_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" /
 STOCK_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "stock.js"
 INDUSTRY_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "industry.js"
 MACRO_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "macro.js"
+CORE_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "core.js"
 
 
 def _template_source() -> str:
@@ -37,6 +38,10 @@ def _industry_js_source() -> str:
 
 def _macro_js_source() -> str:
     return MACRO_JS_PATH.read_text(encoding="utf-8")
+
+
+def _core_js_source() -> str:
+    return CORE_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -348,8 +353,18 @@ def test_index_js_imports_macro_module() -> None:
     assert "setupMacroModule(" in source
 
 
+def test_index_js_imports_core_module() -> None:
+    source = _index_js_source()
+
+    assert 'from "./core.js"' in source
+
+
 def test_macro_js_module_exists() -> None:
     assert MACRO_JS_PATH.exists()
+
+
+def test_core_js_module_exists() -> None:
+    assert CORE_JS_PATH.exists()
 
 
 def test_macro_module_loads_rows_and_signals_together() -> None:
@@ -377,7 +392,9 @@ def test_macro_module_supports_fill_missing_and_valuation_empty_state() -> None:
 
 def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
     source = _stock_js_source()
+    core_source = _core_js_source()
 
+    assert "async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 5000, errorLabel = \"Backend\")" in core_source
     shared_realtime_body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
     watchlist_name_body = _function_body(source, "async function loadWatchlistNames(symbols, requestToken)")
 
@@ -407,7 +424,7 @@ def test_metric_panel_lazy_loads_on_accordion_open() -> None:
 
 
 def test_warning_summaries_use_short_labels_in_status_text() -> None:
-    source = _index_js_source()
+    source = _core_js_source()
     stock_source = _stock_js_source()
 
     assert "function summarizeWarnings(warnings)" in source
