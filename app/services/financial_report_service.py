@@ -105,7 +105,16 @@ _AMOUNT_UNIT_MULTIPLIERS = {
 }
 _METRIC_NEGATIVE_CONTEXTS: dict[str, tuple[str, ...]] = {
     "net_profit": ("被合并方", "上期被合并方", "控制下企业合并"),
-    "deducted_net_profit": ("被合并方", "上期被合并方", "控制下企业合并"),
+    "deducted_net_profit": (
+        "被合并方",
+        "上期被合并方",
+        "控制下企业合并",
+        "分季度主要财务指标",
+        "第一季度",
+        "第二季度",
+        "第三季度",
+        "第四季度",
+    ),
     "debt_ratio": ("被担保对象", "担保金额", "担保余额", "担保总额", "债务担保"),
 }
 _METRIC_PRIMARY_CONTEXTS: dict[str, tuple[str, ...]] = {
@@ -720,6 +729,9 @@ def _infer_unit_context(metric_name: str, context_text: str, inline_unit: str) -
 
     if metric_name not in _AMOUNT_METRICS:
         return inline_unit
+    inline_amount_match = re.search(r"[（(](千万元|百万元|千元|万元|亿元|元)[）)]", normalized_context)
+    if inline_amount_match:
+        return inline_amount_match.group(1)
     normalized_context = re.sub(r"\s+", " ", context_text)
     matches = list(
         re.finditer(r"单位\s*[:：]\s*(?:人民币)?\s*(千万元|百万元|千元|万元|亿元|元)", normalized_context)
@@ -862,56 +874,71 @@ def _extract_table_amount_metric(
     exclude_tokens: tuple[str, ...] = (),
 ) -> tuple[float | None, dict[str, Any] | None]:
     """Extract the first primary-table amount candidate from the annual-report metrics section."""
-    for line, section_unit in section_lines:
-        normalized = line.replace(" ", "")
-        if not all(token in normalized for token in include_tokens):
-            continue
-        if any(token in normalized for token in exclude_tokens):
-            continue
+    normalized_excludes = tuple(token.replace(" ", "") for token in exclude_tokens)
+    for idx, (line, section_unit) in enumerate(section_lines):
+        candidate_lines: list[tuple[str, str | None]] = [(line, section_unit)]
+        if idx + 1 < len(section_lines):
+            next_line, next_unit = section_lines[idx + 1]
+            candidate_lines.append((f"{line}{next_line}", section_unit or next_unit))
 
-        keyword_pos = min((line.find(token) for token in include_tokens if token in line), default=-1)
-        if keyword_pos < 0:
-            continue
-
-        for num_match in _METRIC_NUM_RE.finditer(line):
-            if num_match.start(1) < keyword_pos:
+        for candidate_line, candidate_unit in candidate_lines:
+            normalized = re.sub(r"\s+", "", candidate_line)
+            if not all(token in normalized for token in include_tokens):
                 continue
-
-            number_text = num_match.group(1)
-            inline_unit = num_match.group(2) or ""
-            if _looks_like_section_enumerator(
-                metric_name,
-                number_text,
-                inline_unit,
-                line,
-                num_match.start(1),
-                num_match.end(1),
-            ):
-                continue
-            if _looks_like_note_reference(line, number_text, inline_unit, num_match.start(1), num_match.end(1)):
-                continue
-            if _looks_like_partial_year_or_number(line, num_match.start(1), num_match.end(1)):
+            if any(token and token in normalized for token in normalized_excludes):
                 continue
 
-            effective_unit = inline_unit or (section_unit if metric_name in _AMOUNT_METRICS else inline_unit)
-            value = _to_numeric_value(number_text, effective_unit)
-            if value is None:
-                continue
-            if not _is_candidate_valid(metric_name, effective_unit, value, require_percent=False):
+            key_match = re.search(_build_loose_keyword_pattern(include_tokens[0]), candidate_line, flags=re.IGNORECASE)
+            keyword_pos = key_match.start() if key_match else -1
+            if keyword_pos < 0:
                 continue
 
-            evidence = _build_candidate_evidence(
-                metric_name=metric_name,
-                keyword=include_tokens[0],
-                number_text=number_text,
-                unit=inline_unit,
-                unit_context=effective_unit if effective_unit and effective_unit != inline_unit else None,
-                snippet=line,
-                distance=max(0, num_match.start(1) - keyword_pos),
-                score=500.0,
-                parsed_value=value,
-            )
-            return value, evidence
+            for num_match in _METRIC_NUM_RE.finditer(candidate_line):
+                if num_match.start(1) < key_match.end():
+                    continue
+
+                number_text = num_match.group(1)
+                inline_unit = num_match.group(2) or ""
+                if _looks_like_section_enumerator(
+                    metric_name,
+                    number_text,
+                    inline_unit,
+                    candidate_line,
+                    num_match.start(1),
+                    num_match.end(1),
+                ):
+                    continue
+                if _looks_like_note_reference(
+                    candidate_line,
+                    number_text,
+                    inline_unit,
+                    num_match.start(1),
+                    num_match.end(1),
+                ):
+                    continue
+                if _looks_like_partial_year_or_number(candidate_line, num_match.start(1), num_match.end(1)):
+                    continue
+
+                context_unit = _infer_unit_context(metric_name, candidate_line, inline_unit)
+                effective_unit = context_unit or candidate_unit or ""
+                value = _to_numeric_value(number_text, effective_unit)
+                if value is None:
+                    continue
+                if not _is_candidate_valid(metric_name, effective_unit, value, require_percent=False):
+                    continue
+
+                evidence = _build_candidate_evidence(
+                    metric_name=metric_name,
+                    keyword=include_tokens[0],
+                    number_text=number_text,
+                    unit=inline_unit,
+                    unit_context=effective_unit if effective_unit and effective_unit != inline_unit else None,
+                    snippet=candidate_line,
+                    distance=max(0, num_match.start(1) - keyword_pos),
+                    score=500.0,
+                    parsed_value=value,
+                )
+                return value, evidence
     return None, None
 
 
@@ -955,7 +982,8 @@ def _extract_line_amount_metric(
                         continue
                     if _looks_like_partial_year_or_number(candidate_line, num_match.start(1), num_match.end(1)):
                         continue
-                    effective_unit = inline_unit or inline_context_unit or candidate_unit or ""
+                    context_unit = _infer_unit_context(metric_name, candidate_line, inline_unit or inline_context_unit)
+                    effective_unit = context_unit or candidate_unit or ""
                     value = _to_numeric_value(number_text, effective_unit)
                     if value is None:
                         continue

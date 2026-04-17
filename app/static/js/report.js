@@ -54,6 +54,7 @@ export function setupReportModule({
     history: [],
     sessionSummary: "",
   };
+  let activeRenderedReportSymbol = null;
   let reportQaShowOlderTurns = false;
   const llmStorageKey = "investmentAssistantLlmConfigV1";
   const guidedReportQuestions = [
@@ -72,6 +73,7 @@ export function setupReportModule({
   }
 
   function resetFinancialReportPanel() {
+    activeRenderedReportSymbol = null;
     reportMetricYearEl.textContent = "-";
     reportMetricScoreEl.textContent = "-";
     reportMetricRevenueYoyEl.textContent = "-";
@@ -107,6 +109,21 @@ export function setupReportModule({
     return formatNumber(item.value);
   }
 
+  function formatReportSnapshotOrigin(item) {
+    const origin = item?.origin || "missing";
+    if (origin === "derived") return "Derived";
+    if (origin === "context_fallback") return "Context fallback";
+    if (origin === "extracted") return "Extracted";
+    return "Missing";
+  }
+
+  function formatReportSnapshotUnit(item) {
+    const unit = item?.display_unit || "";
+    if (unit === "CNY") return "Unit: CNY";
+    if (unit === "percent") return "Unit: %";
+    return "";
+  }
+
   function renderFinancialReportSnapshot(snapshot) {
     reportSnapshotSectionsEl.innerHTML = "";
     if (!snapshot || !Array.isArray(snapshot.sections) || !snapshot.sections.length) {
@@ -120,8 +137,17 @@ export function setupReportModule({
       sectionEl.className = "report-snapshot-section";
       const itemsHtml = (section.items || [])
         .map((item) => {
+          const originText = formatReportSnapshotOrigin(item);
           const statusClass = item.status === "available" ? "ok" : "warn";
-          const statusText = item.status === "available" ? "Extracted" : "Missing";
+          const statusText = item.status === "available" ? originText : "Missing";
+          const unitLineHtml = formatReportSnapshotUnit(item)
+            ? `<div class="detail">${escapeHtml(formatReportSnapshotUnit(item))}</div>`
+            : "";
+          const originLineHtml =
+            originText !== "Missing" ? `<div class="detail">${escapeHtml(formatReportSnapshotOrigin(item))}</div>` : "";
+          const formulaHtml = item.formula
+            ? `<div class="detail">${escapeHtml(`Formula: ${item.formula}`)}</div>`
+            : "";
           return `
             <div class="report-snapshot-item">
               <div class="meta">
@@ -129,6 +155,9 @@ export function setupReportModule({
                 <span class="status ${statusClass}">${statusText}</span>
               </div>
               <div class="value">${escapeHtml(formatReportSnapshotValue(item))}</div>
+              ${unitLineHtml}
+              ${originLineHtml}
+              ${formulaHtml}
             </div>
           `;
         })
@@ -579,6 +608,7 @@ export function setupReportModule({
       renderFinancialReportEvidence([]);
       renderFinancialReportTable(data.series || []);
       reportSourceMetaEl.textContent = "";
+      activeRenderedReportSymbol = data.symbol || code;
 
       const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
       const warningText = summarizeWarnings(data.warnings || []);
@@ -646,6 +676,7 @@ export function setupReportModule({
       if (activeSymbol) {
         reportCodeInput.value = activeSymbol;
       }
+      activeRenderedReportSymbol = activeSymbol;
       resetReportQaSession({
         symbol: activeSymbol,
         reportKey,
@@ -673,7 +704,10 @@ export function setupReportModule({
 
     autoReadReportBtn.disabled = true;
     forceReReadReportBtn.disabled = true;
-    resetFinancialReportPanel();
+    const shouldResetPanel = activeRenderedReportSymbol !== code;
+    if (shouldResetPanel) {
+      resetFinancialReportPanel();
+    }
     resetReportQaSession({
       symbol: code,
       reportKey: null,
@@ -701,6 +735,7 @@ export function setupReportModule({
       if (reportSymbol) {
         reportCodeInput.value = reportSymbol;
       }
+      activeRenderedReportSymbol = reportSymbol || code;
       resetReportQaSession({
         symbol: reportSymbol,
         reportKey,

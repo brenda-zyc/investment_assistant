@@ -401,6 +401,40 @@ def test_extract_report_assessment_metrics_reads_split_capex_line_across_adjacen
     assert payload["capex_cash_outflow"] == 2666310780.23
 
 
+def test_extract_report_assessment_metrics_prefers_annual_deducted_profit_and_applies_thousand_unit() -> None:
+    text = """
+    美的集团股份有限公司2025年年度报告
+    六、主要会计数据和财务指标
+    公司是否需追溯调整或重述以前年度会计数据
+    □ 是 √ 否
+     2025 年 2024 年 本年比上年增减 2023 年
+    营业收入（千元） 456,451,731 407,149,600 12.11% 372,037,280
+    归属于上市公司股东的净利润（千元） 43,945,411 38,537,237 14.03% 33,719,935
+    归属于上市公司股东的扣除非经常性损
+    益的净利润（千元） 41,267,233 35,741,418 15.46% 32,974,908
+    经营活动产生的现金流量净额（千元） 53,345,930 60,511,572 -11.84% 57,902,611
+    加权平均净资产收益率 19.70% 21.29% -1.59% 22.23%
+    2025 年末 2024 年末 本年末比上年末增减 2023 年末
+    总资产（千元） 608,791,766 604,351,853 0.73% 486,038,184
+    归属于上市公司股东的净资产（千元） 223,221,305 216,750,057 2.99% 162,878,825
+
+    分季度主要财务指标
+    第一季度 第二季度 第三季度 第四季度
+    归属于上市公司股东的扣除非经常性损益的净利润 12,749,867 13,485,532 10,904,681 4,127,153
+    经营活动产生的现金流量净额 14,320,968 22,960,047 19,785,070 -3,720,155
+    """
+
+    payload = extract_report_assessment_metrics(text, title="美的集团股份有限公司2025年年度报告")
+
+    assert payload["revenue"] == 456_451_731_000.0
+    assert payload["net_profit"] == 43_945_411_000.0
+    assert payload["deducted_net_profit"] == 41_267_233_000.0
+    assert payload["operating_cash_flow"] == 53_345_930_000.0
+    deducted_evidence = next(item for item in payload["evidence"] if item["metric"] == "deducted_net_profit")
+    assert "41,267,233" in deducted_evidence["raw_number"]
+    assert "12,749,867" not in deducted_evidence["snippet"]
+
+
 def test_build_autoread_llm_excerpt_prefers_three_question_relevant_segments() -> None:
     text = """
     2025年年度报告

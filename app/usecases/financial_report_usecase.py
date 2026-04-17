@@ -33,69 +33,205 @@ from app.services.market_data_service import (
 logger = logging.getLogger(__name__)
 
 
-def _snapshot_item(key: str, label: str, value: Any, value_type: str) -> dict[str, Any]:
+_SNAPSHOT_DISPLAY_UNITS = {
+    "amount": "CNY",
+    "percent_point": "percent",
+    "ratio": "percent",
+}
+
+
+def _latest_context_value(
+    historical_context: dict[str, list[tuple[str, float]]] | None,
+    key: str,
+) -> float | None:
+    """Return the latest historical point for one metric key when available."""
+    points = (historical_context or {}).get(key) or []
+    if not points:
+        return None
+    return points[-1][1]
+
+
+def _snapshot_item(
+    key: str,
+    label: str,
+    value: Any,
+    value_type: str,
+    *,
+    origin: str | None = None,
+    formula: str | None = None,
+) -> dict[str, Any]:
     """Build one report-snapshot item with explicit availability status."""
-    return {
+    payload = {
         "key": key,
         "label": label,
         "value": value,
         "value_type": value_type,
         "status": "available" if value is not None else "missing",
+        "origin": origin if value is not None else "missing",
+        "display_unit": _SNAPSHOT_DISPLAY_UNITS.get(value_type),
     }
+    if formula:
+        payload["formula"] = formula
+    return payload
 
 
 def _build_report_snapshot(
     *,
     metrics: dict[str, Any] | None = None,
     derived_metrics: dict[str, Any] | None = None,
+    historical_context: dict[str, list[tuple[str, float]]] | None = None,
 ) -> dict[str, Any]:
     """Build one stable report snapshot for UI cards, tables, and future exports."""
     metrics = metrics or {}
     derived_metrics = derived_metrics or {}
+    metric_values = dict(metrics)
+    metric_origins: dict[str, str] = {}
+    for key, value in metric_values.items():
+        if value is not None:
+            metric_origins[key] = "derived" if key == "interest_bearing_debt" else "extracted"
+
+    for key in ("debt_ratio",):
+        if metric_values.get(key) is None:
+            fallback_value = _latest_context_value(historical_context, key)
+            if fallback_value is not None:
+                metric_values[key] = fallback_value
+                metric_origins[key] = "context_fallback"
+
+    derived_values = dict(derived_metrics)
+    derived_origins: dict[str, str] = {}
+    for key, value in derived_values.items():
+        if value is not None:
+            derived_origins[key] = "derived"
+    if derived_values.get("latest_net_margin") is None:
+        revenue = metric_values.get("revenue")
+        net_profit = metric_values.get("net_profit")
+        if revenue not in (None, 0) and net_profit is not None:
+            derived_values["latest_net_margin"] = net_profit / revenue
+            derived_origins["latest_net_margin"] = "derived"
+
     sections = [
         {
             "id": "summary",
             "title": "Report Summary",
             "items": [
-                _snapshot_item("revenue", "Revenue", metrics.get("revenue"), "amount"),
-                _snapshot_item("net_profit", "Net Profit", metrics.get("net_profit"), "amount"),
-                _snapshot_item("deducted_net_profit", "Deducted Net Profit", metrics.get("deducted_net_profit"), "amount"),
-                _snapshot_item("roe", "ROE", metrics.get("roe"), "percent_point"),
-                _snapshot_item("revenue_yoy", "Revenue YoY", derived_metrics.get("revenue_yoy"), "ratio"),
-                _snapshot_item("net_profit_yoy", "Net Profit YoY", derived_metrics.get("net_profit_yoy"), "ratio"),
-                _snapshot_item("latest_net_margin", "Net Margin", derived_metrics.get("latest_net_margin"), "ratio"),
+                _snapshot_item("revenue", "Revenue", metric_values.get("revenue"), "amount", origin=metric_origins.get("revenue")),
+                _snapshot_item("net_profit", "Net Profit", metric_values.get("net_profit"), "amount", origin=metric_origins.get("net_profit")),
+                _snapshot_item(
+                    "deducted_net_profit",
+                    "Deducted Net Profit",
+                    metric_values.get("deducted_net_profit"),
+                    "amount",
+                    origin=metric_origins.get("deducted_net_profit"),
+                ),
+                _snapshot_item("roe", "ROE", metric_values.get("roe"), "percent_point", origin=metric_origins.get("roe")),
+                _snapshot_item("revenue_yoy", "Revenue YoY", derived_values.get("revenue_yoy"), "ratio", origin=derived_origins.get("revenue_yoy")),
+                _snapshot_item(
+                    "net_profit_yoy",
+                    "Net Profit YoY",
+                    derived_values.get("net_profit_yoy"),
+                    "ratio",
+                    origin=derived_origins.get("net_profit_yoy"),
+                ),
+                _snapshot_item(
+                    "latest_net_margin",
+                    "Net Margin",
+                    derived_values.get("latest_net_margin"),
+                    "ratio",
+                    origin=derived_origins.get("latest_net_margin"),
+                ),
             ],
         },
         {
             "id": "balance_sheet",
             "title": "Balance Sheet Skeleton",
             "items": [
-                _snapshot_item("total_assets", "Total Assets", metrics.get("total_assets"), "amount"),
-                _snapshot_item("total_liabilities", "Total Liabilities", metrics.get("total_liabilities"), "amount"),
-                _snapshot_item("net_assets", "Net Assets", metrics.get("net_assets"), "amount"),
-                _snapshot_item("attributable_equity", "Attributable Equity", metrics.get("attributable_equity"), "amount"),
-                _snapshot_item("debt_ratio", "Debt Ratio", metrics.get("debt_ratio"), "percent_point"),
+                _snapshot_item("total_assets", "Total Assets", metric_values.get("total_assets"), "amount", origin=metric_origins.get("total_assets")),
+                _snapshot_item(
+                    "total_liabilities",
+                    "Total Liabilities",
+                    metric_values.get("total_liabilities"),
+                    "amount",
+                    origin=metric_origins.get("total_liabilities"),
+                ),
+                _snapshot_item("net_assets", "Net Assets", metric_values.get("net_assets"), "amount", origin=metric_origins.get("net_assets")),
+                _snapshot_item(
+                    "attributable_equity",
+                    "Attributable Equity",
+                    metric_values.get("attributable_equity"),
+                    "amount",
+                    origin=metric_origins.get("attributable_equity"),
+                ),
+                _snapshot_item(
+                    "debt_ratio",
+                    "Debt Ratio",
+                    metric_values.get("debt_ratio"),
+                    "percent_point",
+                    origin=metric_origins.get("debt_ratio"),
+                ),
             ],
         },
         {
             "id": "cash_flow",
             "title": "Cash Flow & Capex",
             "items": [
-                _snapshot_item("operating_cash_flow", "Operating Cash Flow", metrics.get("operating_cash_flow"), "amount"),
-                _snapshot_item("capex_cash_outflow", "Capex Cash Outflow", metrics.get("capex_cash_outflow"), "amount"),
+                _snapshot_item(
+                    "operating_cash_flow",
+                    "Operating Cash Flow",
+                    metric_values.get("operating_cash_flow"),
+                    "amount",
+                    origin=metric_origins.get("operating_cash_flow"),
+                ),
+                _snapshot_item(
+                    "capex_cash_outflow",
+                    "Capex Cash Outflow",
+                    metric_values.get("capex_cash_outflow"),
+                    "amount",
+                    origin=metric_origins.get("capex_cash_outflow"),
+                ),
             ],
         },
         {
             "id": "detail_metrics",
             "title": "Key Balance Sheet Details",
             "items": [
-                _snapshot_item("monetary_funds", "Monetary Funds", metrics.get("monetary_funds"), "amount"),
-                _snapshot_item("accounts_receivable", "Accounts Receivable", metrics.get("accounts_receivable"), "amount"),
-                _snapshot_item("inventory", "Inventory", metrics.get("inventory"), "amount"),
-                _snapshot_item("fixed_assets", "Fixed Assets", metrics.get("fixed_assets"), "amount"),
-                _snapshot_item("construction_in_progress", "Construction in Progress", metrics.get("construction_in_progress"), "amount"),
-                _snapshot_item("interest_bearing_debt", "Interest-bearing Debt", metrics.get("interest_bearing_debt"), "amount"),
-                _snapshot_item("goodwill", "Goodwill", metrics.get("goodwill"), "amount"),
+                _snapshot_item(
+                    "monetary_funds",
+                    "Monetary Funds",
+                    metric_values.get("monetary_funds"),
+                    "amount",
+                    origin=metric_origins.get("monetary_funds"),
+                ),
+                _snapshot_item(
+                    "accounts_receivable",
+                    "Accounts Receivable",
+                    metric_values.get("accounts_receivable"),
+                    "amount",
+                    origin=metric_origins.get("accounts_receivable"),
+                ),
+                _snapshot_item("inventory", "Inventory", metric_values.get("inventory"), "amount", origin=metric_origins.get("inventory")),
+                _snapshot_item(
+                    "fixed_assets",
+                    "Fixed Assets",
+                    metric_values.get("fixed_assets"),
+                    "amount",
+                    origin=metric_origins.get("fixed_assets"),
+                ),
+                _snapshot_item(
+                    "construction_in_progress",
+                    "Construction in Progress",
+                    metric_values.get("construction_in_progress"),
+                    "amount",
+                    origin=metric_origins.get("construction_in_progress"),
+                ),
+                _snapshot_item(
+                    "interest_bearing_debt",
+                    "Interest-bearing Debt",
+                    metric_values.get("interest_bearing_debt"),
+                    "amount",
+                    origin=metric_origins.get("interest_bearing_debt"),
+                    formula="short_term_borrowings + current_non_current_debt + long_term_borrowings + bonds_payable + lease_liabilities",
+                ),
+                _snapshot_item("goodwill", "Goodwill", metric_values.get("goodwill"), "amount", origin=metric_origins.get("goodwill")),
             ],
         },
     ]
@@ -182,7 +318,13 @@ def analyze_financial_report_url(
     fetched = fetch_report_text_from_url(url)
 
     extracted = extract_report_assessment_metrics(fetched["text"], title=fetched.get("title"))
-    analysis_payload = _build_url_analysis_payload(extracted)
+    historical_context: dict[str, list[tuple[str, float]]] = {}
+    if symbol:
+        try:
+            historical_context = fetch_report_assessment_context(symbol)
+        except Exception as exc:
+            logger.warning("URL report context fetch failed for %s: %s", symbol, exc)
+    analysis_payload = _build_url_analysis_payload(extracted, historical_context)
 
     if extracted.get("warnings"):
         analysis_payload["highlights"] = [
@@ -332,12 +474,16 @@ def _build_url_analysis_rows(extracted_metrics: dict | None) -> list[dict[str, A
     ]
 
 
-def _build_url_analysis_payload(extracted_metrics: dict | None) -> dict:
+def _build_url_analysis_payload(
+    extracted_metrics: dict | None,
+    historical_context: dict[str, list[tuple[str, float]]] | None = None,
+) -> dict:
     """Build a report-analysis payload from extracted metrics."""
     analysis_payload = compute_financial_report_analysis(_build_url_analysis_rows(extracted_metrics))
     analysis_payload["report_snapshot"] = _build_report_snapshot(
         metrics=extracted_metrics or {},
         derived_metrics=analysis_payload.get("metrics"),
+        historical_context=historical_context,
     )
     return analysis_payload
 
@@ -436,7 +582,14 @@ def _persist_report_artifact(
 
 def _restore_url_analysis_payload_from_artifact(row: dict[str, Any]) -> dict:
     """Rebuild the URL-analysis response from a persisted artifact row."""
-    analysis_payload = _build_url_analysis_payload(row.get("extracted_metrics") or {})
+    historical_context: dict[str, list[tuple[str, float]]] = {}
+    symbol = str(row.get("symbol") or "").strip()
+    if symbol:
+        try:
+            historical_context = fetch_report_assessment_context(symbol)
+        except Exception as exc:
+            logger.warning("Artifact report context fetch failed for %s: %s", symbol, exc)
+    analysis_payload = _build_url_analysis_payload(row.get("extracted_metrics") or {}, historical_context)
     return {
         "source_url": row.get("document_url"),
         "source_title": row.get("title"),
@@ -488,6 +641,7 @@ def _restore_autoread_payload_from_artifact(
         "report_snapshot": _build_report_snapshot(
             metrics=stored_metrics,
             derived_metrics=assessment.get("derived_metrics", {}),
+            historical_context=historical_context,
         ),
         "historical_context": historical_context,
         "answers": stored_answers,
@@ -637,6 +791,7 @@ def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False
         "report_snapshot": _build_report_snapshot(
             metrics=extracted_metrics or {},
             derived_metrics=assessment.get("derived_metrics", {}),
+            historical_context=historical_context,
         ),
         "historical_context": historical_context,
         "answers": assessment.get("answers", []),

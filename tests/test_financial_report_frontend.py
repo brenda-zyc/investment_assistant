@@ -60,17 +60,15 @@ def _function_body(source: str, function_signature: str) -> str:
     raise AssertionError(f"Could not locate function body for {function_signature!r}")
 
 
-def test_auto_read_annual_report_resets_stale_financial_report_sections() -> None:
-    """Auto-read should clear previously rendered summary sections before fetching a new symbol."""
+def test_auto_read_annual_report_only_resets_when_symbol_changes() -> None:
+    """Auto-read should preserve current results for the same symbol and clear only when the symbol changes."""
     source = _report_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
-    reset_call = "resetFinancialReportPanel();"
-    assert reset_call in body
-
-    reset_index = body.index(reset_call)
-    fetch_index = body.index("const res = await fetch(")
-    assert reset_index < fetch_index
+    assert "let activeRenderedReportSymbol = null;" in source
+    assert "const shouldResetPanel = activeRenderedReportSymbol !== code;" in body
+    assert "if (shouldResetPanel) {" in body
+    assert "resetFinancialReportPanel();" in body
 
 
 def test_auto_read_annual_report_has_empty_state_for_missing_report_source() -> None:
@@ -212,6 +210,27 @@ def test_report_flows_render_report_snapshot_sections() -> None:
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in report_body
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in url_body
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in autoread_body
+
+
+def test_report_snapshot_renderer_displays_origin_and_display_unit_metadata() -> None:
+    source = _report_js_source()
+    body = _function_body(source, "function renderFinancialReportSnapshot(snapshot)")
+
+    assert "formatReportSnapshotOrigin(item)" in source
+    assert "formatReportSnapshotUnit(item)" in source
+    assert 'Context fallback' in source
+    assert 'Derived' in source
+    assert 'Extracted' in source
+    assert '${escapeHtml(formatReportSnapshotUnit(item))}' in body
+    assert '${escapeHtml(formatReportSnapshotOrigin(item))}' in body
+
+
+def test_report_snapshot_renderer_shows_formula_when_present() -> None:
+    source = _report_js_source()
+    body = _function_body(source, "function renderFinancialReportSnapshot(snapshot)")
+
+    assert 'item.formula' in body
+    assert 'formula' in body
 
 
 def test_auto_read_resets_report_qa_before_fetch() -> None:

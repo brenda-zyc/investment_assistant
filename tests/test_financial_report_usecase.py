@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import app.services.report_qa_service as report_qa_service
 from app.usecases import financial_report_usecase
 
@@ -364,6 +366,9 @@ def test_analyze_financial_report_url_returns_report_key_and_caches_context(monk
     assert snapshot_items["revenue"]["value"] == 100000000000.0
     assert snapshot_items["roe"]["value"] == 16.0
     assert snapshot_items["operating_cash_flow"]["status"] == "missing"
+    assert snapshot_items["revenue"]["origin"] == "extracted"
+    assert snapshot_items["revenue"]["display_unit"] == "CNY"
+    assert snapshot_items["roe"]["display_unit"] == "percent"
 
 
 def test_analyze_financial_report_url_returns_none_report_key_when_report_text_is_empty(monkeypatch) -> None:
@@ -872,6 +877,7 @@ def test_financial_report_autoread_uses_active_report_date_for_as_of_when_histor
         lambda _symbol: {
             "revenue": [("2025-12-31", 180.0)],
             "net_profit": [("2025-12-31", 90.0)],
+            "debt_ratio": [("2024-12-31", 48.5)],
         },
     )
     monkeypatch.setattr(
@@ -927,4 +933,8 @@ def test_financial_report_autoread_uses_active_report_date_for_as_of_when_histor
     }
     assert snapshot_items["revenue"]["value"] == 170_899_152_276.34
     assert snapshot_items["operating_cash_flow"]["value"] == 92_463_692_168.43
-    assert snapshot_items["debt_ratio"]["status"] == "missing"
+    assert snapshot_items["debt_ratio"]["value"] == 48.5
+    assert snapshot_items["debt_ratio"]["origin"] == "context_fallback"
+    assert snapshot_items["debt_ratio"]["status"] == "available"
+    assert snapshot_items["latest_net_margin"]["value"] == pytest.approx(86_228_000_000.0 / 170_899_152_276.34)
+    assert snapshot_items["latest_net_margin"]["origin"] == "derived"
