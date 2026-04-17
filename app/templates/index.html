@@ -556,6 +556,81 @@
         font-weight: 600;
       }
 
+      .report-snapshot {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+
+      .report-snapshot-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .report-snapshot-head h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .report-snapshot-sections {
+        display: grid;
+        gap: 10px;
+      }
+
+      .report-snapshot-section {
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .report-snapshot-section h4 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .report-snapshot-items {
+        display: grid;
+        gap: 8px;
+      }
+
+      @media (min-width: 980px) {
+        .report-snapshot-items {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .report-snapshot-item {
+        border: 1px solid #e5edf7;
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 8px 10px;
+      }
+
+      .report-snapshot-item .meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .report-snapshot-item .name {
+        color: #475569;
+        font-size: 12px;
+      }
+
+      .report-snapshot-item .value {
+        font-family: "Fira Code", monospace;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
       .report-insight-list {
         display: grid;
         gap: 8px;
@@ -1154,6 +1229,14 @@
             </div>
           </div>
 
+          <section class="report-snapshot" aria-live="polite">
+            <div class="report-snapshot-head">
+              <h3>Report Snapshot</h3>
+              <div id="reportSnapshotMeta" class="tiny-note"></div>
+            </div>
+            <div id="reportSnapshotSections" class="report-snapshot-sections"></div>
+          </section>
+
           <h3>Auto Analysis</h3>
           <div id="reportInsightList" class="report-insight-list"></div>
           <h3>Three Questions</h3>
@@ -1229,6 +1312,8 @@
       const metricClose = document.getElementById("metricClose");
       const metricChange = document.getElementById("metricChange");
       const metricQuality = document.getElementById("metricQuality");
+      const metricAccordionToggleEl = document.querySelector('[aria-controls="metricAccordionBody"]');
+      const metricAccordionBodyEl = document.getElementById("metricAccordionBody");
 
       const priceLimitSelect = document.getElementById("priceLimitSelect");
       const priceTableBody = document.querySelector("#priceTable tbody");
@@ -1281,6 +1366,8 @@
       const reportMetricScoreEl = document.getElementById("reportMetricScore");
       const reportMetricRevenueYoyEl = document.getElementById("reportMetricRevenueYoy");
       const reportMetricProfitYoyEl = document.getElementById("reportMetricProfitYoy");
+      const reportSnapshotMetaEl = document.getElementById("reportSnapshotMeta");
+      const reportSnapshotSectionsEl = document.getElementById("reportSnapshotSections");
       const reportInsightListEl = document.getElementById("reportInsightList");
       const reportAutoreadListEl = document.getElementById("reportAutoreadList");
       const reportLlmAnalysisEl = document.getElementById("reportLlmAnalysis");
@@ -1297,7 +1384,17 @@
       let currentFinancialRows = [];
       let currentSymbol = null;
       let currentSymbolName = null;
+      let stockMetricLoadedSymbol = null;
+      let stockMetricLoadingSymbol = null;
+      let latestRealtimeSnapshotData = null;
+      let realtimeRefreshInFlight = false;
+      let realtimeRequestPromise = null;
+      let queuedRealtimeSymbols = new Set();
+      let inFlightRealtimeSymbols = new Set();
       let watchlistSymbols = [];
+      let watchlistRequestToken = 0;
+      let latestWatchlistRealtimeBaseStatus = "";
+      let latestWatchlistRealtimeRequestToken = 0;
       let lastMacroRows = [];
       let macroLoadedOnce = false;
       let industryLoadedOnce = false;
@@ -1424,6 +1521,23 @@
         }
       }
 
+      async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 5000, errorLabel = "Backend") {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(url, { ...options, signal: controller.signal });
+          const data = await parseJsonResponse(response, errorLabel);
+          return { response, data };
+        } catch (err) {
+          if (err?.name === "AbortError") {
+            throw new Error(`${errorLabel} timed out after ${Math.round(timeoutMs / 1000)}s.`);
+          }
+          throw err;
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
+
       function resetMetrics() {
         metricSymbol.textContent = "-";
         metricClose.textContent = "-";
@@ -1522,6 +1636,8 @@
         reportMetricScoreEl.textContent = "-";
         reportMetricRevenueYoyEl.textContent = "-";
         reportMetricProfitYoyEl.textContent = "-";
+        reportSnapshotMetaEl.textContent = "";
+        reportSnapshotSectionsEl.innerHTML = "";
         reportInsightListEl.innerHTML = "";
         reportAutoreadListEl.innerHTML = "";
         reportLlmAnalysisEl.innerHTML = "";
@@ -1541,6 +1657,48 @@
         }
         reportMetricRevenueYoyEl.textContent = formatPercent(payload.metrics?.revenue_yoy);
         reportMetricProfitYoyEl.textContent = formatPercent(payload.metrics?.net_profit_yoy);
+      }
+
+      function formatReportSnapshotValue(item) {
+        const valueType = item?.value_type || "amount";
+        if (item?.value === null || item?.value === undefined || item?.value === "") return "-";
+        if (valueType === "ratio") return formatPercent(item.value);
+        if (valueType === "percent_point") return `${formatNumber(item.value)}%`;
+        return formatNumber(item.value);
+      }
+
+      function renderFinancialReportSnapshot(snapshot) {
+        reportSnapshotSectionsEl.innerHTML = "";
+        if (!snapshot || !Array.isArray(snapshot.sections) || !snapshot.sections.length) {
+          reportSnapshotMetaEl.textContent = "No structured report snapshot available.";
+          return;
+        }
+
+        reportSnapshotMetaEl.textContent = `Available fields: ${snapshot.available_count ?? 0} / ${snapshot.total_count ?? 0}`;
+        snapshot.sections.forEach((section) => {
+          const sectionEl = document.createElement("section");
+          sectionEl.className = "report-snapshot-section";
+          const itemsHtml = (section.items || [])
+            .map((item) => {
+              const statusClass = item.status === "available" ? "ok" : "warn";
+              const statusText = item.status === "available" ? "Extracted" : "Missing";
+              return `
+                <div class="report-snapshot-item">
+                  <div class="meta">
+                    <div class="name">${escapeHtml(item.label || item.key || "-")}</div>
+                    <span class="status ${statusClass}">${statusText}</span>
+                  </div>
+                  <div class="value">${escapeHtml(formatReportSnapshotValue(item))}</div>
+                </div>
+              `;
+            })
+            .join("");
+          sectionEl.innerHTML = `
+            <h4>${escapeHtml(section.title || "-")}</h4>
+            <div class="report-snapshot-items">${itemsHtml}</div>
+          `;
+          reportSnapshotSectionsEl.appendChild(sectionEl);
+        });
       }
 
       function renderFinancialReportHighlights(highlights) {
@@ -1625,7 +1783,7 @@
       }
 
       function buildIndustryWarningText(data) {
-        return (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+        return summarizeWarnings(data.warnings || []);
       }
 
       function latestAsOfFromRows(rows) {
@@ -2032,6 +2190,32 @@
         });
       }
 
+      function isMetricAccordionOpen() {
+        return (
+          metricAccordionToggleEl &&
+          metricAccordionToggleEl.getAttribute("aria-expanded") === "true" &&
+          metricAccordionBodyEl &&
+          !metricAccordionBodyEl.hidden
+        );
+      }
+
+      function maybeLoadMetricPanel() {
+        if (!currentSymbol) {
+          stockMetricStatusEl.textContent = "Run Analysis to load metric percentiles.";
+          return;
+        }
+        if (!isMetricAccordionOpen()) {
+          stockMetricStatusEl.textContent = "Expand Metric Percentile Panel to load percentile history.";
+          return;
+        }
+        if (stockMetricLoadedSymbol === currentSymbol || stockMetricLoadingSymbol === currentSymbol) {
+          return;
+        }
+        stockMetricStatusEl.textContent = "Loading metric percentile panel...";
+        stockMetricLoadingSymbol = currentSymbol;
+        void loadStockMetricPanel(currentSymbol);
+      }
+
       async function analyzeSingleStock(refresh = false) {
         const code = stockCodeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
@@ -2044,51 +2228,45 @@
         singleStatusEl.textContent = refresh
           ? "Refreshing upstream stock data..."
           : "Loading cached stock snapshot...";
+        stockMetricStatusEl.textContent = "";
+        realtimeStatusEl.textContent = "";
 
         try {
-          const [res, metricRes] = await Promise.all([
-            fetch(`${apiBase}/api/analyze`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ stock_code: code, refresh }),
-            }),
-            fetch(`${apiBase}/stock_metrics?symbol=${encodeURIComponent(code)}`),
-          ]);
-          const [data, metricData] = await Promise.all([
-            parseJsonResponse(res),
-            parseJsonResponse(metricRes, "Metrics endpoint"),
-          ]);
+          const res = await fetch(`${apiBase}/api/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stock_code: code, refresh }),
+          });
+          const data = await parseJsonResponse(res);
           if (!res.ok) throw new Error(data.detail || "Request failed");
-          if (!metricRes.ok) throw new Error(metricData.detail || "Metric request failed");
 
           currentPriceRows = data.price_data || [];
           currentFinancialRows = data.financial_summary || [];
           currentSymbol = data.symbol || code;
           currentSymbolName = data.symbol_name || data.realtime?.name || null;
+          stockMetricLoadedSymbol = null;
+          stockMetricLoadingSymbol = null;
           reportCodeInput.value = currentSymbol;
           renderPriceRows(currentPriceRows);
           renderFinancialRows(currentFinancialRows);
-          renderStockMetricRows(metricData.metrics || []);
-          stockMetricStatusEl.textContent = metricData.as_of
-            ? `As of: ${metricData.as_of}.`
-            : "As of: -";
           updateMetrics(data.symbol, currentPriceRows, currentFinancialRows);
-          if (data.realtime) {
-            updateSingleRealtimeDisplay(data.realtime);
-            if (data.realtime.updated_at) {
-              realtimeStatusEl.textContent = `Realtime as of ${data.realtime.updated_at}.`;
-            }
-          } else {
-            metricSymbol.textContent = currentSymbolName ? `${currentSymbol} ${currentSymbolName}` : currentSymbol;
-            realtimeStatusEl.textContent = "";
-          }
+          metricSymbol.textContent = currentSymbolName ? `${currentSymbol} ${currentSymbolName}` : currentSymbol;
 
-          const warningText = (data.warnings || []).length
-            ? ` Warnings: ${(data.warnings || []).join(" | ")}`
-            : "";
+          const warningText = summarizeWarnings(data.warnings || []);
           singleStatusEl.textContent = `${
             refresh ? "Refreshed" : "Loaded cached snapshot for"
           } ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
+
+          if (currentSymbol) {
+            stockMetricTableBody.innerHTML = "";
+            maybeLoadMetricPanel();
+            realtimeStatusEl.textContent = refresh
+              ? "Realtime quote will update on the next background refresh."
+              : "Using historical latest close until background realtime refresh.";
+            if (latestRealtimeSnapshotData) {
+              applyCachedSingleRealtimeSnapshot();
+            }
+          }
         } catch (err) {
           if (isBackendUnreachable(err)) {
             singleStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
@@ -2110,6 +2288,190 @@
           analyzeBtn.disabled = false;
           refreshSingleStockBtn.disabled = false;
         }
+      }
+
+      async function loadStockMetricPanel(symbol) {
+        try {
+          const { response, data: metricData } = await fetchJsonWithTimeout(
+            `${apiBase}/stock_metrics?symbol=${encodeURIComponent(symbol)}`,
+            {},
+            5000,
+            "Metrics endpoint"
+          );
+          if (!response.ok) throw new Error(metricData.detail || "Metric request failed");
+          if (symbol !== currentSymbol) return;
+          renderStockMetricRows(metricData.metrics || []);
+          stockMetricLoadedSymbol = symbol;
+          if (metricData.valuation_refresh_in_flight || metricData.financial_refresh_in_flight) {
+            stockMetricStatusEl.textContent = metricData.as_of
+              ? `As of: ${metricData.as_of}. Metric history refreshing in background.`
+              : "Metric panel warming in background; history not ready yet.";
+          } else {
+            stockMetricStatusEl.textContent = metricData.as_of
+              ? `As of: ${metricData.as_of}.`
+              : "As of: -";
+          }
+        } catch (err) {
+          if (symbol !== currentSymbol) return;
+          stockMetricLoadedSymbol = null;
+          stockMetricTableBody.innerHTML = "";
+          stockMetricStatusEl.textContent = isBackendUnreachable(err)
+            ? `Error: Cannot connect to backend at ${apiBase}.`
+            : `Metric panel unavailable: ${err.message}`;
+        } finally {
+          if (symbol === currentSymbol) {
+            stockMetricLoadingSymbol = null;
+          }
+        }
+      }
+
+      function applySingleRealtimeSnapshot(data) {
+        if (!currentSymbol) return;
+        const quote = (data.quotes || {})[currentSymbol];
+        if (!quote) {
+          realtimeStatusEl.textContent = data.refresh_in_flight
+            ? "Realtime refresh in progress; using historical latest close."
+            : "Realtime quote unavailable; using historical latest close.";
+          return;
+        }
+        updateSingleRealtimeDisplay(quote);
+        if (data.is_stale && data.as_of) {
+          realtimeStatusEl.textContent = `Realtime cache as of ${data.as_of}; refresh in progress.`;
+        } else if (quote.updated_at) {
+          realtimeStatusEl.textContent = `Realtime as of ${quote.updated_at}.`;
+        } else if (data.as_of) {
+          realtimeStatusEl.textContent = `Realtime cache as of ${data.as_of}.`;
+        } else {
+          realtimeStatusEl.textContent = "Realtime quote loaded.";
+        }
+      }
+
+      function applyWatchlistRealtimeSnapshot(data) {
+        if (!watchlistSymbols.length) return;
+        if (latestWatchlistRealtimeRequestToken !== watchlistRequestToken) return;
+        if (!latestWatchlistRealtimeBaseStatus) return;
+
+        const quotes = data.quotes || {};
+        applyRealtimeToWatchlist(quotes);
+        const quoteCount = watchlistSymbols.filter((symbol) => quotes[symbol]).length;
+        watchlistStatusEl.textContent =
+          quoteCount > 0
+            ? data.is_stale && data.as_of
+              ? `${latestWatchlistRealtimeBaseStatus} Realtime cache as of ${data.as_of}; refresh in progress.`
+              : `${latestWatchlistRealtimeBaseStatus} Realtime loaded for ${quoteCount} symbol${quoteCount === 1 ? "" : "s"}.`
+            : data.refresh_in_flight
+              ? `${latestWatchlistRealtimeBaseStatus} Realtime refresh in progress; showing cached watchlist snapshot.`
+              : `${latestWatchlistRealtimeBaseStatus} Realtime quote unavailable; showing cached watchlist snapshot.`;
+      }
+
+      function applyRealtimeSnapshotFailure() {
+        if (currentSymbol) {
+          realtimeStatusEl.textContent = "Realtime quote unavailable; using historical latest close.";
+        }
+        if (
+          watchlistSymbols.length &&
+          latestWatchlistRealtimeRequestToken === watchlistRequestToken &&
+          latestWatchlistRealtimeBaseStatus
+        ) {
+          watchlistStatusEl.textContent = `${latestWatchlistRealtimeBaseStatus} Realtime quote unavailable; showing cached watchlist snapshot.`;
+        }
+      }
+
+      function applyCachedSingleRealtimeSnapshot() {
+        if (!currentSymbol || !latestRealtimeSnapshotData) return false;
+        const quote = (latestRealtimeSnapshotData.quotes || {})[currentSymbol];
+        if (!quote) return false;
+        applySingleRealtimeSnapshot(latestRealtimeSnapshotData);
+        return true;
+      }
+
+      function applyCachedWatchlistRealtimeSnapshot() {
+        if (!watchlistSymbols.length || !latestRealtimeSnapshotData) return false;
+        const quotes = latestRealtimeSnapshotData.quotes || {};
+        const hasAnyQuote = watchlistSymbols.some((symbol) => Boolean(quotes[symbol]));
+        if (!hasAnyQuote) return false;
+        applyWatchlistRealtimeSnapshot(latestRealtimeSnapshotData);
+        return true;
+      }
+
+      async function requestSharedRealtimeSnapshot(symbols) {
+        symbols.filter(Boolean).forEach((symbol) => {
+          if (!inFlightRealtimeSymbols.has(symbol)) {
+            queuedRealtimeSymbols.add(symbol);
+          }
+        });
+
+        if (!queuedRealtimeSymbols.size && realtimeRequestPromise) return realtimeRequestPromise;
+        if (realtimeRequestPromise) return realtimeRequestPromise;
+
+        const requestedSymbols = [...queuedRealtimeSymbols];
+        if (!requestedSymbols.length) return null;
+        queuedRealtimeSymbols.clear();
+        inFlightRealtimeSymbols = new Set(requestedSymbols);
+
+        realtimeRequestPromise = (async () => {
+          try {
+            const url = `${apiBase}/api/realtime-prices?symbols=${encodeURIComponent(requestedSymbols.join(","))}`;
+            const { response, data } = await fetchJsonWithTimeout(url, {}, 4000, "Realtime endpoint");
+            if (!response.ok) throw new Error(data.detail || "Realtime request failed");
+            latestRealtimeSnapshotData = data;
+            applySingleRealtimeSnapshot(data);
+            applyWatchlistRealtimeSnapshot(data);
+            return data;
+          } catch (err) {
+            applyRealtimeSnapshotFailure();
+            throw err;
+          } finally {
+            realtimeRequestPromise = null;
+            inFlightRealtimeSymbols = new Set();
+            if (queuedRealtimeSymbols.size) {
+              void requestSharedRealtimeSnapshot([...queuedRealtimeSymbols]);
+            }
+          }
+        })();
+
+        return realtimeRequestPromise;
+      }
+
+      async function loadSingleStockRealtime() {
+        if (!currentSymbol) return;
+        try {
+          await requestSharedRealtimeSnapshot([currentSymbol]);
+        } catch (_err) {}
+      }
+
+      async function loadWatchlistRealtime(symbols, baseStatusText, requestToken) {
+        latestWatchlistRealtimeBaseStatus = baseStatusText;
+        latestWatchlistRealtimeRequestToken = requestToken;
+        if (!symbols.length) return;
+        try {
+          await requestSharedRealtimeSnapshot(symbols);
+        } catch (_err) {}
+      }
+
+      async function loadWatchlistNames(symbols, requestToken) {
+        if (!symbols.length) return;
+        try {
+          const { response, data } = await fetchJsonWithTimeout(
+            `${apiBase}/api/stock-names?symbols=${encodeURIComponent(symbols.join(","))}`,
+            {},
+            3000,
+            "Stock names endpoint"
+          );
+          if (requestToken !== watchlistRequestToken) return;
+          if (!response.ok) throw new Error(data.detail || "Stock names request failed");
+          const names = data.names || {};
+          Object.entries(names).forEach(([symbol, name]) => {
+            if (!name) return;
+            const row = watchlistTableBody.querySelector(`tr[data-symbol="${symbol}"]`);
+            if (!row) return;
+            const nameCell = row.querySelector(".watchlist-name");
+            if (!nameCell) return;
+            if (!nameCell.textContent || nameCell.textContent.trim() === "-") {
+              nameCell.textContent = name;
+            }
+          });
+        } catch (_err) {}
       }
 
       function parseWatchlistInput(text) {
@@ -2147,6 +2509,11 @@
           return "Realtime quote: historical close used";
         }
         return text;
+      }
+
+      function summarizeWarnings(warnings) {
+        const summarized = [...new Set((warnings || []).map(classifyWarningMessage).filter(Boolean))];
+        return summarized.length ? ` Warnings: ${summarized.join(" | ")}` : "";
       }
 
       function buildWatchlistStatusDetail(item) {
@@ -2220,7 +2587,18 @@
         });
       }
 
+      function watchlistSymbolsMissingNames(symbols) {
+        return symbols.filter((symbol) => {
+          const row = watchlistTableBody.querySelector(`tr[data-symbol="${symbol}"]`);
+          const nameCell = row?.querySelector(".watchlist-name");
+          const nameText = nameCell?.textContent?.trim() || "";
+          return !nameText || nameText === "-";
+        });
+      }
+
       async function refreshRealtimePrices() {
+        if (document.visibilityState !== "visible") return;
+        if (realtimeRefreshInFlight) return;
         const symbolPool = [];
         if (currentSymbol) symbolPool.push(currentSymbol);
         watchlistSymbols.forEach((symbol) => {
@@ -2228,19 +2606,13 @@
         });
         if (!symbolPool.length) return;
 
+        realtimeRefreshInFlight = true;
         try {
-          const url = `${apiBase}/api/realtime-prices?symbols=${encodeURIComponent(symbolPool.join(","))}`;
-          const res = await fetch(url);
-          const data = await parseJsonResponse(res);
-          if (!res.ok) return;
-          const quotes = data.quotes || {};
-          if (currentSymbol && quotes[currentSymbol]) {
-            updateSingleRealtimeDisplay(quotes[currentSymbol]);
-          }
-          applyRealtimeToWatchlist(quotes);
-          realtimeStatusEl.textContent = `Realtime refreshed at ${new Date().toLocaleTimeString()}.`;
-        } catch (err) {
+          await requestSharedRealtimeSnapshot(symbolPool);
+        } catch (_err) {
           // Silent fail: realtime feed should not block base analysis UX.
+        } finally {
+          realtimeRefreshInFlight = false;
         }
       }
 
@@ -2253,6 +2625,7 @@
 
         analyzeWatchlistBtn.disabled = true;
         refreshWatchlistBtn.disabled = true;
+        const requestToken = ++watchlistRequestToken;
         watchlistStatusEl.textContent = refresh
           ? `Refreshing ${codes.length} symbols...`
           : `Loading cached watchlist for ${codes.length} symbols...`;
@@ -2271,11 +2644,26 @@
           const rows = data.results || [];
           renderWatchlistRows(rows);
           const okCount = rows.filter((x) => !x.error).length;
-          watchlistStatusEl.textContent = `${
+          const baseStatusText = `${
             refresh ? "Refreshed" : "Loaded cached watchlist."
           } ${okCount}/${rows.length} symbols succeeded.`;
+          latestWatchlistRealtimeBaseStatus = baseStatusText;
+          latestWatchlistRealtimeRequestToken = requestToken;
+          watchlistStatusEl.textContent = watchlistSymbols.length
+            ? refresh
+              ? `${baseStatusText} Realtime will update on the next background refresh.`
+              : `${baseStatusText} Using cached watchlist snapshot until background realtime refresh.`
+            : baseStatusText;
+          if (latestRealtimeSnapshotData) {
+            applyCachedWatchlistRealtimeSnapshot();
+          }
+          const unresolvedNameSymbols = watchlistSymbolsMissingNames(watchlistSymbols);
+          if (unresolvedNameSymbols.length) {
+            void loadWatchlistNames(unresolvedNameSymbols, requestToken);
+          }
         } catch (err) {
           watchlistTableBody.innerHTML = "";
+          watchlistSymbols = [];
           if (isBackendUnreachable(err)) {
             watchlistStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
           } else {
@@ -2314,13 +2702,14 @@
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
           renderFinancialReportSummary(data);
+          renderFinancialReportSnapshot(data.report_snapshot || null);
           renderFinancialReportHighlights(data.highlights || []);
           renderFinancialReportEvidence([]);
           renderFinancialReportTable(data.series || []);
           reportSourceMetaEl.textContent = "";
 
           const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          const warningText = summarizeWarnings(data.warnings || []);
           reportStatusEl.textContent = `${
             refresh ? "Refreshed" : "Loaded cached summary for"
           } ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
@@ -2371,6 +2760,7 @@
 
           const analysis = data.analysis || {};
           renderFinancialReportSummary(analysis);
+          renderFinancialReportSnapshot(data.report_snapshot || null);
           renderFinancialReportHighlights(analysis.highlights || []);
           renderFinancialReportEvidence(data.extracted?.evidence || []);
           renderFinancialReportTable(analysis.series || []);
@@ -2432,6 +2822,7 @@
           if (!res.ok) throw new Error(data.detail || "Request failed");
 
           renderFinancialReportAutoreadAnswers(data.answers || []);
+          renderFinancialReportSnapshot(data.report_snapshot || null);
           renderReportCurrentMode(data.current_mode || null);
           renderReportLlmStatus(data);
           renderReportLlmAnalysis(data.llm_analysis || null);
@@ -2470,7 +2861,7 @@
           }
 
           const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
+          const warningText = summarizeWarnings(data.warnings || []);
           reportStatusEl.textContent = `${
             forceRefresh ? "Force re-read completed for" : "Auto-read completed for"
           } ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
@@ -2515,6 +2906,8 @@
               history: reportQaSession.history.slice(-6).map((turn) => ({
                 role: turn.role,
                 content: turn.content,
+                evidence: Array.isArray(turn.evidence) ? turn.evidence : [],
+                citations: Array.isArray(turn.citations) ? turn.citations : [],
               })),
               session_summary: reportQaSession.sessionSummary,
               use_llm: true,
@@ -2877,6 +3270,9 @@
           buttonEl.setAttribute("aria-expanded", String(!isExpanded));
           bodyEl.hidden = isExpanded;
           cardEl.classList.toggle("is-open", !isExpanded);
+          if (bodyId === "metricAccordionBody" && !isExpanded) {
+            maybeLoadMetricPanel();
+          }
         });
       });
 
@@ -2929,8 +3325,8 @@
       loadLlmSessionStatus();
       loadMacroIndicators();
       macroLoadedOnce = true;
-      // Poll realtime prices every 30 seconds; realtime values are not persisted.
-      setInterval(refreshRealtimePrices, 30000);
+      // Poll realtime prices every 60 seconds when the page is visible; realtime values are not persisted.
+      setInterval(refreshRealtimePrices, 60000);
     </script>
   </body>
 </html>

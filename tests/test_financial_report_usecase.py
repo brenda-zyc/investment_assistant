@@ -355,6 +355,15 @@ def test_analyze_financial_report_url_returns_report_key_and_caches_context(monk
     assert cached_context["symbol"] == "000333"
     assert cached_context["report"]["document_url"] == "https://example.com/report.pdf"
     assert cached_context["report_text"].startswith("2024年年度报告")
+    assert payload["report_snapshot"]["sections"][0]["title"] == "Report Summary"
+    snapshot_items = {
+        item["key"]: item
+        for section in payload["report_snapshot"]["sections"]
+        for item in section["items"]
+    }
+    assert snapshot_items["revenue"]["value"] == 100000000000.0
+    assert snapshot_items["roe"]["value"] == 16.0
+    assert snapshot_items["operating_cash_flow"]["status"] == "missing"
 
 
 def test_analyze_financial_report_url_returns_none_report_key_when_report_text_is_empty(monkeypatch) -> None:
@@ -910,3 +919,12 @@ def test_financial_report_autoread_uses_active_report_date_for_as_of_when_histor
 
     assert payload["report"]["title"] == "贵州茅台2024年年度报告"
     assert payload["as_of"] == "2024-12-31"
+    assert payload["report_snapshot"]["sections"][1]["title"] == "Balance Sheet Skeleton"
+    snapshot_items = {
+        item["key"]: item
+        for section in payload["report_snapshot"]["sections"]
+        for item in section["items"]
+    }
+    assert snapshot_items["revenue"]["value"] == 170_899_152_276.34
+    assert snapshot_items["operating_cash_flow"]["value"] == 92_463_692_168.43
+    assert snapshot_items["debt_ratio"]["status"] == "missing"

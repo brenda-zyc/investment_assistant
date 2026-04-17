@@ -58,6 +58,14 @@ def test_financial_report_template_includes_llm_settings_panel_hooks() -> None:
     assert 'id="reportLlmAnalysis"' in source
     assert "localStorage" in source
 
+
+def test_financial_report_template_includes_report_snapshot_panel_hooks() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert 'id="reportSnapshotSections"' in source
+    assert "function renderFinancialReportSnapshot(snapshot)" in source
+
+
 def test_financial_report_template_includes_report_qa_panel() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
 
@@ -96,6 +104,8 @@ def test_financial_report_template_includes_report_qa_ask_flow() -> None:
     assert 'fetch(`${apiBase}/api/financial-report-qa`' in body
     assert 'appendReportQaTurn("user", question);' in body
     assert "history: reportQaSession.history.slice(-6).map" in body
+    assert "evidence: Array.isArray(turn.evidence) ? turn.evidence : []" in body
+    assert "citations: Array.isArray(turn.citations) ? turn.citations : []" in body
     assert "reportQaSession.sessionSummary" in body
     assert "updated_session_summary" in body
     assert "renderReportQaTranscript" in body
@@ -156,6 +166,17 @@ def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
     assert body.index(reset_call) < body.index(fetch_call)
 
 
+def test_report_flows_render_report_snapshot_sections() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    report_body = _function_body(source, "async function loadFinancialReport(refresh = false)")
+    url_body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
+    autoread_body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
+
+    assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in report_body
+    assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in url_body
+    assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in autoread_body
+
+
 def test_auto_read_resets_report_qa_before_fetch() -> None:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
@@ -195,6 +216,118 @@ def test_stock_and_report_requests_include_refresh_flags_when_requested() -> Non
     assert "financial-report-analysis?symbol=" in report_body
     assert "&refresh=${refresh ? \"true\" : \"false\"}" in report_body
     assert "force_refresh=${forceRefresh ? \"true\" : \"false\"}" in autoread_body
+
+
+def test_analyze_single_stock_renders_cached_tables_without_triggering_new_realtime_fetch() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
+
+    assert "Promise.all([" not in body
+    assert "renderPriceRows(currentPriceRows);" in body
+    assert "renderFinancialRows(currentFinancialRows);" in body
+    assert "maybeLoadMetricPanel();" in body
+    assert "void loadSingleStockRealtime();" not in body
+    assert 'refresh\n              ? "Realtime quote will update on the next background refresh."\n              : "Using historical latest close until background realtime refresh."' in body
+    assert "if (latestRealtimeSnapshotData) {" in body
+    assert "applyCachedSingleRealtimeSnapshot();" in body
+
+
+def test_async_single_stock_helpers_exist_for_metric_and_realtime_enrichment() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    lazy_metric_body = _function_body(source, "function maybeLoadMetricPanel()")
+    metric_body = _function_body(source, "async function loadStockMetricPanel(symbol)")
+    realtime_body = _function_body(source, "async function loadSingleStockRealtime()")
+    failure_body = _function_body(source, "function applyRealtimeSnapshotFailure()")
+
+    assert "Expand Metric Percentile Panel to load percentile history." in lazy_metric_body
+    assert 'stockMetricStatusEl.textContent = "Loading metric percentile panel...";' in lazy_metric_body
+    assert "/stock_metrics?symbol=" in metric_body
+    assert "requestSharedRealtimeSnapshot" in realtime_body
+    assert "Metric history refreshing in background." in metric_body
+    assert "Metric panel warming in background; history not ready yet." in metric_body
+    assert "Realtime quote unavailable; using historical latest close." in failure_body
+
+
+def test_analyze_watchlist_renders_cached_rows_without_triggering_new_realtime_fetch() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
+
+    assert "renderWatchlistRows(rows);" in body
+    assert "void loadWatchlistRealtime(" not in body
+    assert '`${baseStatusText} Realtime will update on the next background refresh.`' in body
+    assert '`${baseStatusText} Using cached watchlist snapshot until background realtime refresh.`' in body
+    assert "const unresolvedNameSymbols = watchlistSymbolsMissingNames(watchlistSymbols);" in body
+    assert "void loadWatchlistNames(unresolvedNameSymbols, requestToken);" in body
+    assert "if (latestRealtimeSnapshotData) {" in body
+    assert "applyCachedWatchlistRealtimeSnapshot();" in body
+    assert body.index("applyCachedWatchlistRealtimeSnapshot();") < body.index("watchlistSymbolsMissingNames")
+
+
+def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 5000, errorLabel = \"Backend\")" in source
+    shared_realtime_body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
+    watchlist_name_body = _function_body(source, "async function loadWatchlistNames(symbols, requestToken)")
+
+    metric_body = _function_body(source, "async function loadStockMetricPanel(symbol)")
+    single_realtime_body = _function_body(source, "async function loadSingleStockRealtime()")
+
+    assert "fetchJsonWithTimeout(" in metric_body
+    assert "fetchJsonWithTimeout(" in shared_realtime_body
+    assert "fetchJsonWithTimeout(" in watchlist_name_body
+    assert "requestSharedRealtimeSnapshot(" in single_realtime_body
+    assert "/api/stock-names?symbols=" in watchlist_name_body
+    assert "Metric panel unavailable:" in metric_body
+    assert "Realtime quote unavailable; showing cached watchlist snapshot." in source
+
+
+def test_metric_panel_lazy_loads_on_accordion_open() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "const metricAccordionToggleEl = document.querySelector('[aria-controls=\"metricAccordionBody\"]');" in source
+    assert "let stockMetricLoadedSymbol = null;" in source
+    assert "let stockMetricLoadingSymbol = null;" in source
+    accordion_body = _function_body(source, "buttonEl.addEventListener(\"click\", () =>")
+
+    assert 'if (bodyId === "metricAccordionBody" && !isExpanded) {' in accordion_body
+    assert "maybeLoadMetricPanel();" in accordion_body
+
+
+def test_warning_summaries_use_short_labels_in_status_text() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    assert "function summarizeWarnings(warnings)" in source
+    assert 'return summarized.length ? ` Warnings: ${summarized.join(" | ")}` : "";' in source
+    assert "const warningText = summarizeWarnings(data.warnings || []);" in source
+
+
+def test_realtime_polling_skips_hidden_tabs_and_overlapping_requests() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function refreshRealtimePrices()")
+
+    assert "let realtimeRefreshInFlight = false;" in source
+    assert "let latestRealtimeSnapshotData = null;" in source
+    assert "let realtimeRequestPromise = null;" in source
+    assert "let queuedRealtimeSymbols = new Set();" in source
+    assert 'document.visibilityState !== "visible"' in body
+    assert "if (realtimeRefreshInFlight) return;" in body
+    assert "realtimeRefreshInFlight = true;" in body
+    assert "realtimeRefreshInFlight = false;" in body
+    assert "setInterval(refreshRealtimePrices, 60000);" in source
+
+
+def test_shared_realtime_scheduler_batches_requests_and_replays_queued_symbols() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
+
+    assert "queuedRealtimeSymbols.add(symbol);" in body
+    assert "if (realtimeRequestPromise) return realtimeRequestPromise;" in body
+    assert "const requestedSymbols = [...queuedRealtimeSymbols];" in body
+    assert "queuedRealtimeSymbols.clear();" in body
+    assert "latestRealtimeSnapshotData = data;" in body
+    assert "if (queuedRealtimeSymbols.size) {" in body
 
 
 def test_report_url_helper_copy_is_limited_to_official_disclosure_links() -> None:

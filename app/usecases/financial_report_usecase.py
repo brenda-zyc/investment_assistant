@@ -33,6 +33,81 @@ from app.services.market_data_service import (
 logger = logging.getLogger(__name__)
 
 
+def _snapshot_item(key: str, label: str, value: Any, value_type: str) -> dict[str, Any]:
+    """Build one report-snapshot item with explicit availability status."""
+    return {
+        "key": key,
+        "label": label,
+        "value": value,
+        "value_type": value_type,
+        "status": "available" if value is not None else "missing",
+    }
+
+
+def _build_report_snapshot(
+    *,
+    metrics: dict[str, Any] | None = None,
+    derived_metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one stable report snapshot for UI cards, tables, and future exports."""
+    metrics = metrics or {}
+    derived_metrics = derived_metrics or {}
+    sections = [
+        {
+            "id": "summary",
+            "title": "Report Summary",
+            "items": [
+                _snapshot_item("revenue", "Revenue", metrics.get("revenue"), "amount"),
+                _snapshot_item("net_profit", "Net Profit", metrics.get("net_profit"), "amount"),
+                _snapshot_item("deducted_net_profit", "Deducted Net Profit", metrics.get("deducted_net_profit"), "amount"),
+                _snapshot_item("roe", "ROE", metrics.get("roe"), "percent_point"),
+                _snapshot_item("revenue_yoy", "Revenue YoY", derived_metrics.get("revenue_yoy"), "ratio"),
+                _snapshot_item("net_profit_yoy", "Net Profit YoY", derived_metrics.get("net_profit_yoy"), "ratio"),
+                _snapshot_item("latest_net_margin", "Net Margin", derived_metrics.get("latest_net_margin"), "ratio"),
+            ],
+        },
+        {
+            "id": "balance_sheet",
+            "title": "Balance Sheet Skeleton",
+            "items": [
+                _snapshot_item("total_assets", "Total Assets", metrics.get("total_assets"), "amount"),
+                _snapshot_item("total_liabilities", "Total Liabilities", metrics.get("total_liabilities"), "amount"),
+                _snapshot_item("net_assets", "Net Assets", metrics.get("net_assets"), "amount"),
+                _snapshot_item("attributable_equity", "Attributable Equity", metrics.get("attributable_equity"), "amount"),
+                _snapshot_item("debt_ratio", "Debt Ratio", metrics.get("debt_ratio"), "percent_point"),
+            ],
+        },
+        {
+            "id": "cash_flow",
+            "title": "Cash Flow & Capex",
+            "items": [
+                _snapshot_item("operating_cash_flow", "Operating Cash Flow", metrics.get("operating_cash_flow"), "amount"),
+                _snapshot_item("capex_cash_outflow", "Capex Cash Outflow", metrics.get("capex_cash_outflow"), "amount"),
+            ],
+        },
+        {
+            "id": "detail_metrics",
+            "title": "Key Balance Sheet Details",
+            "items": [
+                _snapshot_item("monetary_funds", "Monetary Funds", metrics.get("monetary_funds"), "amount"),
+                _snapshot_item("accounts_receivable", "Accounts Receivable", metrics.get("accounts_receivable"), "amount"),
+                _snapshot_item("inventory", "Inventory", metrics.get("inventory"), "amount"),
+                _snapshot_item("fixed_assets", "Fixed Assets", metrics.get("fixed_assets"), "amount"),
+                _snapshot_item("construction_in_progress", "Construction in Progress", metrics.get("construction_in_progress"), "amount"),
+                _snapshot_item("interest_bearing_debt", "Interest-bearing Debt", metrics.get("interest_bearing_debt"), "amount"),
+                _snapshot_item("goodwill", "Goodwill", metrics.get("goodwill"), "amount"),
+            ],
+        },
+    ]
+    total_count = sum(len(section["items"]) for section in sections)
+    available_count = sum(1 for section in sections for item in section["items"] if item["status"] == "available")
+    return {
+        "sections": sections,
+        "available_count": available_count,
+        "total_count": total_count,
+    }
+
+
 def _artifact_has_current_extraction_version(row: dict[str, Any] | None) -> bool:
     """Return whether a persisted artifact was produced by the current parser rules."""
     extracted_metrics = (row or {}).get("extracted_metrics") or {}
@@ -71,6 +146,15 @@ def get_financial_report_analysis(symbol: str, *, refresh: bool = False) -> dict
         warnings.append(f"Stock name fetch failed. Reason: {exc}")
 
     analysis_payload = compute_financial_report_analysis(stored_financial_rows)
+    analysis_payload["report_snapshot"] = _build_report_snapshot(
+        metrics={
+            "revenue": analysis_payload["metrics"].get("revenue"),
+            "net_profit": analysis_payload["metrics"].get("net_profit"),
+            "roe": analysis_payload["metrics"].get("roe"),
+            "debt_ratio": analysis_payload["metrics"].get("debt_ratio"),
+        },
+        derived_metrics=analysis_payload.get("metrics"),
+    )
     analysis_payload["symbol"] = symbol
     analysis_payload["symbol_name"] = symbol_name
     analysis_payload["warnings"] = warnings
@@ -143,6 +227,7 @@ def analyze_financial_report_url(
         "tls_insecure": fetched.get("tls_insecure"),
         "report_key": report_key,
         "analysis": analysis_payload,
+        "report_snapshot": analysis_payload.get("report_snapshot"),
         "extracted": extracted,
     }
 
@@ -250,6 +335,10 @@ def _build_url_analysis_rows(extracted_metrics: dict | None) -> list[dict[str, A
 def _build_url_analysis_payload(extracted_metrics: dict | None) -> dict:
     """Build a report-analysis payload from extracted metrics."""
     analysis_payload = compute_financial_report_analysis(_build_url_analysis_rows(extracted_metrics))
+    analysis_payload["report_snapshot"] = _build_report_snapshot(
+        metrics=extracted_metrics or {},
+        derived_metrics=analysis_payload.get("metrics"),
+    )
     return analysis_payload
 
 
@@ -347,6 +436,7 @@ def _persist_report_artifact(
 
 def _restore_url_analysis_payload_from_artifact(row: dict[str, Any]) -> dict:
     """Rebuild the URL-analysis response from a persisted artifact row."""
+    analysis_payload = _build_url_analysis_payload(row.get("extracted_metrics") or {})
     return {
         "source_url": row.get("document_url"),
         "source_title": row.get("title"),
@@ -354,7 +444,8 @@ def _restore_url_analysis_payload_from_artifact(row: dict[str, Any]) -> dict:
         "pdf_pages": row.get("pdf_pages"),
         "tls_insecure": None,
         "report_key": row.get("report_key"),
-        "analysis": _build_url_analysis_payload(row.get("extracted_metrics") or {}),
+        "analysis": analysis_payload,
+        "report_snapshot": analysis_payload.get("report_snapshot"),
         "extracted": row.get("extracted_metrics") or {},
     }
 
@@ -394,6 +485,10 @@ def _restore_autoread_payload_from_artifact(
             "tls_insecure": None,
         },
         "extracted_metrics": stored_metrics,
+        "report_snapshot": _build_report_snapshot(
+            metrics=stored_metrics,
+            derived_metrics=assessment.get("derived_metrics", {}),
+        ),
         "historical_context": historical_context,
         "answers": stored_answers,
         "derived_metrics": assessment.get("derived_metrics", {}),
@@ -539,6 +634,10 @@ def autonomous_financial_report_read(symbol: str, *, force_refresh: bool = False
             "tls_insecure": fetched_report.get("tls_insecure") if fetched_report else None,
         },
         "extracted_metrics": extracted_metrics or {},
+        "report_snapshot": _build_report_snapshot(
+            metrics=extracted_metrics or {},
+            derived_metrics=assessment.get("derived_metrics", {}),
+        ),
         "historical_context": historical_context,
         "answers": assessment.get("answers", []),
         "derived_metrics": assessment.get("derived_metrics", {}),
