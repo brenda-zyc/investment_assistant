@@ -765,7 +765,25 @@ def _looks_like_partial_year_or_number(snippet: str, match_start: int, match_end
     next_char = snippet[match_end] if match_end < len(snippet) else ""
     if prev_char.isdigit() or next_char.isdigit():
         return True
-    return next_char == "年"
+    return prev_char in {"年", "月", "日"} or next_char in {"年", "月", "日"}
+
+
+def _looks_like_note_reference(line: str, number_text: str, inline_unit: str, match_start: int, match_end: int) -> bool:
+    """Reject note indices such as '七、25' before the actual balance-sheet amount."""
+    if inline_unit:
+        return False
+    if "," in number_text or "." in number_text:
+        return False
+    normalized_number = number_text.replace(",", "").strip()
+    if not normalized_number.isdigit():
+        return False
+    if int(normalized_number) > 99:
+        return False
+    trailing = line[match_end : min(len(line), match_end + 12)]
+    if re.match(r"\s+[0-9][0-9,\.]*", trailing):
+        return True
+    prefix = line[max(0, match_start - 4) : match_start]
+    return any(token in prefix for token in ("七、", "七（", "附注", "注", "（", "("))
 
 
 def _clean_evidence_snippet(metric_name: str, snippet: str, number_text: str) -> str:
@@ -870,6 +888,8 @@ def _extract_table_amount_metric(
                 num_match.end(1),
             ):
                 continue
+            if _looks_like_note_reference(line, number_text, inline_unit, num_match.start(1), num_match.end(1)):
+                continue
             if _looks_like_partial_year_or_number(line, num_match.start(1), num_match.end(1)):
                 continue
 
@@ -931,6 +951,10 @@ def _extract_line_amount_metric(
 
                     number_text = num_match.group(1)
                     inline_unit = num_match.group(2) or ""
+                    if _looks_like_note_reference(candidate_line, number_text, inline_unit, num_match.start(1), num_match.end(1)):
+                        continue
+                    if _looks_like_partial_year_or_number(candidate_line, num_match.start(1), num_match.end(1)):
+                        continue
                     effective_unit = inline_unit or inline_context_unit or candidate_unit or ""
                     value = _to_numeric_value(number_text, effective_unit)
                     if value is None:
@@ -1237,6 +1261,99 @@ def extract_financial_row_from_report_text(text: str, title: str | None = None) 
             net_assets = total_assets - total_liabilities
         elif attributable_equity is not None:
             net_assets = attributable_equity
+    monetary_funds, monetary_funds_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="monetary_funds",
+        keywords=("货币资金",),
+    )
+    accounts_receivable, accounts_receivable_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="accounts_receivable",
+        keywords=("应收账款",),
+        exclude_tokens=("客户应收账款",),
+    )
+    inventory, inventory_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="inventory",
+        keywords=("存货",),
+        exclude_tokens=("存货风险", "存货跌价准备", "存货成本高于其可变现净值", "存货减值"),
+    )
+    fixed_assets, fixed_assets_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="fixed_assets",
+        keywords=("固定资产",),
+        exclude_tokens=("购建固定资产", "处置固定资产", "固定资产投资", "转入固定资产", "固定资产、无形资产"),
+    )
+    construction_in_progress, construction_in_progress_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="construction_in_progress",
+        keywords=("在建工程",),
+        exclude_tokens=("重要在建工程项目", "在建工程等项目", "在建工程项目情况"),
+    )
+    goodwill, goodwill_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="goodwill",
+        keywords=("商誉",),
+        exclude_tokens=("账面价值为", "关键审计事项", "审计中的应对", "商誉减值", "使用寿命不确定", "长期待摊费用"),
+    )
+    short_term_borrowings, short_term_borrowings_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="interest_bearing_debt",
+        keywords=("短期借款",),
+    )
+    current_non_current_debt, current_non_current_debt_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="interest_bearing_debt",
+        keywords=("一年内到期的非流动负债",),
+    )
+    long_term_borrowings, long_term_borrowings_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="interest_bearing_debt",
+        keywords=("长期借款",),
+    )
+    bonds_payable, bonds_payable_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="interest_bearing_debt",
+        keywords=("应付债券",),
+    )
+    lease_liabilities, lease_liabilities_evidence = _extract_line_amount_metric(
+        all_lines_with_units,
+        metric_name="interest_bearing_debt",
+        keywords=("租赁负债",),
+    )
+    interest_bearing_components = [
+        value
+        for value in (
+            short_term_borrowings,
+            current_non_current_debt,
+            long_term_borrowings,
+            bonds_payable,
+            lease_liabilities,
+        )
+        if value is not None
+    ]
+    interest_bearing_debt = sum(interest_bearing_components) if interest_bearing_components else None
+    interest_bearing_debt_evidence = None
+    if interest_bearing_debt is not None:
+        interest_bearing_debt_evidence = {
+            "metric": "interest_bearing_debt",
+            "keyword": "derived_sum",
+            "raw_number": " + ".join(
+                key
+                for key, value in (
+                    ("short_term_borrowings", short_term_borrowings),
+                    ("current_non_current_debt", current_non_current_debt),
+                    ("long_term_borrowings", long_term_borrowings),
+                    ("bonds_payable", bonds_payable),
+                    ("lease_liabilities", lease_liabilities),
+                )
+                if value is not None
+            ),
+            "parsed_value": interest_bearing_debt,
+            "distance": 0,
+            "score": 620.0,
+            "snippet": "derived from short/long debt, current portion, bonds, and lease liabilities",
+        }
 
     roe, roe_evidence = _extract_line_percent_metric(
         section_only_lines,
@@ -1280,6 +1397,18 @@ def extract_financial_row_from_report_text(text: str, title: str | None = None) 
             attributable_equity_evidence,
             total_liabilities_evidence,
             net_assets_evidence,
+            monetary_funds_evidence,
+            accounts_receivable_evidence,
+            inventory_evidence,
+            fixed_assets_evidence,
+            construction_in_progress_evidence,
+            goodwill_evidence,
+            short_term_borrowings_evidence,
+            current_non_current_debt_evidence,
+            long_term_borrowings_evidence,
+            bonds_payable_evidence,
+            lease_liabilities_evidence,
+            interest_bearing_debt_evidence,
             roe_evidence,
             debt_evidence,
         ]
@@ -1307,6 +1436,13 @@ def extract_financial_row_from_report_text(text: str, title: str | None = None) 
         "net_assets": net_assets,
         "attributable_equity": attributable_equity,
         "total_liabilities": total_liabilities,
+        "monetary_funds": monetary_funds,
+        "accounts_receivable": accounts_receivable,
+        "inventory": inventory,
+        "fixed_assets": fixed_assets,
+        "construction_in_progress": construction_in_progress,
+        "goodwill": goodwill,
+        "interest_bearing_debt": interest_bearing_debt,
         "roe": roe,
         "debt_ratio": debt_ratio,
         "evidence": evidence,
@@ -1420,6 +1556,13 @@ def extract_report_assessment_metrics(text: str, title: str | None = None) -> di
         "net_assets": base.get("net_assets"),
         "attributable_equity": base.get("attributable_equity"),
         "total_liabilities": base.get("total_liabilities"),
+        "monetary_funds": base.get("monetary_funds"),
+        "accounts_receivable": base.get("accounts_receivable"),
+        "inventory": base.get("inventory"),
+        "fixed_assets": base.get("fixed_assets"),
+        "construction_in_progress": base.get("construction_in_progress"),
+        "goodwill": base.get("goodwill"),
+        "interest_bearing_debt": base.get("interest_bearing_debt"),
         "deducted_net_profit": deducted_net_profit,
         "operating_cash_flow": operating_cash_flow,
         "roe": base.get("roe"),

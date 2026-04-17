@@ -108,6 +108,103 @@ def test_extract_financial_row_extracts_balance_sheet_skeleton_fields() -> None:
     assert payload["net_assets"] == 136394793732.69
 
 
+def test_extract_financial_row_extracts_priority_balance_sheet_detail_fields() -> None:
+    text = """
+    某公司2024年年度报告
+    资产构成重大变动情况
+    单位：元
+    货币资金 127,398,915,484.11 67.67% 115,456,300,910.64 69.79% -2.12%
+    应收账款 37,346,561.95 0.02% 42,647,461.48 0.03% -0.01%
+    存货 18,233,702,166.62 9.69% 17,387,841,712.87 10.51% -0.82%
+    固定资产 7,264,740,683.62 3.86% 5,189,917,302.17 3.14% 0.72%
+    在建工程 5,795,172,321.07 3.08% 5,623,356,422.20 3.40% -0.32%
+
+    合并资产负债表
+    单位：元
+    商誉 1,621,619.53 1,621,619.53
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="某公司2024年年度报告")
+
+    assert payload["monetary_funds"] == 127398915484.11
+    assert payload["accounts_receivable"] == 37346561.95
+    assert payload["inventory"] == 18233702166.62
+    assert payload["fixed_assets"] == 7264740683.62
+    assert payload["construction_in_progress"] == 5795172321.07
+    assert payload["goodwill"] == 1621619.53
+
+
+def test_extract_financial_row_derives_interest_bearing_debt_without_matching_goodwill_narrative() -> None:
+    text = """
+    海尔智家股份有限公司2025年年度报告
+    关键审计事项
+    截至2025年12月31日，商誉的账面价值为273.00亿元。
+
+    合并资产负债表
+    单位：元
+    短期借款 17,420,784,420.86 13,784,367,443.93
+    一年内到期的非流动负债 8,678,897,462.98 16,530,040,461.37
+    长期借款 11,165,886,169.09 9,665,074,313.67
+    应付债券 3,500,000,000.00 -
+    租赁负债 4,551,410,567.84 4,480,895,997.36
+    商誉
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="海尔智家股份有限公司2025年年度报告")
+
+    assert payload["goodwill"] is None
+    assert payload["interest_bearing_debt"] == pytest.approx(
+        17420784420.86
+        + 8678897462.98
+        + 11165886169.09
+        + 3500000000.00
+        + 4551410567.84
+    )
+
+
+def test_extract_financial_row_does_not_take_next_field_value_for_empty_goodwill_row() -> None:
+    text = """
+    贵州茅台2025年年度报告
+    合并资产负债表
+    单位：元
+    开发支出 117,009,982.85 98,522,878.42
+    商誉
+    长期待摊费用 135,324,580.08 152,105,949.85
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="贵州茅台2025年年度报告")
+
+    assert payload["goodwill"] is None
+
+
+def test_extract_financial_row_ignores_inventory_risk_paragraph_numbering() -> None:
+    text = """
+    海尔智家股份有限公司2025年年度报告
+    9、存货风险。由于公司不能总是准确地预测各种趋势和事件，并始终保持足够的存货水平。
+    10、资本开支风险：全球经济增速放缓以及消费需求预期下滑的宏观环境背景下，市场需求可能无法及时吸纳现有产能。
+
+    资产构成重大变动情况
+    单位：元
+    存货 52,345,678,901.23 48,765,432,109.87
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="海尔智家股份有限公司2025年年度报告")
+
+    assert payload["inventory"] == 52345678901.23
+
+
+def test_extract_financial_row_ignores_inventory_impairment_narrative_numbering() -> None:
+    text = """
+    海尔智家股份有限公司2025年年度报告
+    公司会管理存货并根据市场情况作出调整，同时也会定期评估存货减值。
+    10、资本开支风险：全球经济增速放缓以及消费需求预期下滑的宏观环境背景下，市场需求可能无法及时吸纳现有产能。
+    """
+
+    payload = extract_financial_row_from_report_text(text, title="海尔智家股份有限公司2025年年度报告")
+
+    assert payload["inventory"] is None
+
+
 def test_extract_financial_row_with_sparse_text() -> None:
     text = "这是一个公告页面，但没有关键财务指标。"
     payload = extract_financial_row_from_report_text(text, title="测试公告")
