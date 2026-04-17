@@ -377,32 +377,32 @@ def test_persist_report_artifact_rehydrates_hot_cache_via_shared_mapper(monkeypa
     report_qa_service.clear_report_context_cache()
     captured_row: dict[str, object] = {}
     mapper_calls: list[str] = []
-    original_row_mapper = report_context_service.artifact_row_from_context
-    original_context_mapper = report_context_service.context_from_artifact_row
+    original_row_mapper = report_context_service.context_to_artifact_row
+    original_context_mapper = report_context_service.artifact_row_to_context
 
     def fake_upsert_report_artifact(row):
         captured_row.update(row)
 
-    def fake_artifact_row_from_context(**kwargs):
-        mapper_calls.append("artifact_row_from_context")
+    def fake_context_to_artifact_row(**kwargs):
+        mapper_calls.append("context_to_artifact_row")
         row = original_row_mapper(**kwargs)
         row["parsed_at"] = "2026-04-17T16:30:00+00:00"
         return row
 
-    def fake_context_from_artifact_row(row):
-        mapper_calls.append("context_from_artifact_row")
+    def fake_artifact_row_to_context(row):
+        mapper_calls.append("artifact_row_to_context")
         return original_context_mapper(row)
 
     monkeypatch.setattr(financial_report_usecase, "upsert_report_artifact", fake_upsert_report_artifact)
     monkeypatch.setattr(
         financial_report_usecase.report_context_service,
-        "artifact_row_from_context",
-        fake_artifact_row_from_context,
+        "context_to_artifact_row",
+        fake_context_to_artifact_row,
     )
     monkeypatch.setattr(
         financial_report_usecase.report_context_service,
-        "context_from_artifact_row",
-        fake_context_from_artifact_row,
+        "artifact_row_to_context",
+        fake_artifact_row_to_context,
     )
 
     report_key = financial_report_usecase._persist_report_artifact(
@@ -422,7 +422,7 @@ def test_persist_report_artifact_rehydrates_hot_cache_via_shared_mapper(monkeypa
     )
 
     assert report_key == "000333|https://example.com/report.pdf"
-    assert mapper_calls == ["artifact_row_from_context", "context_from_artifact_row"]
+    assert mapper_calls == ["context_to_artifact_row", "artifact_row_to_context"]
     assert captured_row["report_key"] == report_key
     assert captured_row["symbol"] == "000333"
     assert captured_row["document_url"] == "https://example.com/report.pdf"
@@ -723,16 +723,16 @@ def test_analyze_financial_report_url_reuses_matching_artifact_when_force_refres
     """URL analysis should return a persisted artifact when the report key already exists."""
     report_qa_service.clear_report_context_cache()
     captured: dict[str, int] = {"mapper_calls": 0}
-    original_context_mapper = report_context_service.context_from_artifact_row
+    original_context_mapper = report_context_service.artifact_row_to_context
 
-    def fake_context_from_artifact_row(row):
+    def fake_artifact_row_to_context(row):
         captured["mapper_calls"] += 1
         return original_context_mapper(row)
 
     monkeypatch.setattr(
         financial_report_usecase.report_context_service,
-        "context_from_artifact_row",
-        fake_context_from_artifact_row,
+        "artifact_row_to_context",
+        fake_artifact_row_to_context,
     )
     monkeypatch.setattr(
         financial_report_usecase,

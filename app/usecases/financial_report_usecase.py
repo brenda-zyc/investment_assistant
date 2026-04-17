@@ -488,42 +488,12 @@ def _build_url_analysis_payload(
     )
     return analysis_payload
 
-
-def _artifact_row(
-    *,
-    symbol: str | None,
-    report: dict | None,
-    report_text: str | None,
-    extracted_metrics: dict | None,
-    answers: list[dict] | None,
-    llm_analysis: dict | None,
-) -> dict[str, Any] | None:
-    """Build one SQLite artifact row from the current report context."""
-    if not symbol or not report_text:
-        return None
-
-    row = report_context_service.artifact_row_from_context(
-        symbol=symbol,
-        report=report,
-        report_text=report_text,
-        extracted_metrics=extracted_metrics,
-        answers=answers,
-        llm_analysis=llm_analysis,
-        extraction_version=REPORT_EXTRACTION_VERSION,
-        is_historical_fallback=not _has_usable_report_metrics(extracted_metrics),
-        now=dt.datetime.now(dt.UTC),
-    )
-    if not row:
-        return None
-    return row
-
-
 def _store_hot_report_context_from_artifact(row: dict[str, Any]) -> None:
     """Populate the optional in-memory hot cache from a persisted artifact."""
     report_key = str(row.get("report_key") or "").strip()
     if not report_key:
         return
-    store_report_context(report_key, report_context_service.context_from_artifact_row(row))
+    store_report_context(report_key, report_context_service.artifact_row_to_context(row))
 
 
 def _persist_report_artifact(
@@ -536,13 +506,16 @@ def _persist_report_artifact(
     llm_analysis: dict | None,
 ) -> str | None:
     """Persist one report artifact and refresh the hot in-memory cache."""
-    row = _artifact_row(
+    row = report_context_service.context_to_artifact_row(
         symbol=symbol,
         report=report,
         report_text=report_text,
         extracted_metrics=extracted_metrics,
         answers=answers,
         llm_analysis=llm_analysis,
+        extraction_version=REPORT_EXTRACTION_VERSION,
+        is_historical_fallback=not _has_usable_report_metrics(extracted_metrics),
+        now=dt.datetime.now(dt.UTC),
     )
     if not row:
         return None

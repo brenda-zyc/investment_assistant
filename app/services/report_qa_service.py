@@ -154,11 +154,6 @@ def get_cached_report_context(report_key: str) -> dict[str, Any] | None:
     return copy.deepcopy(current) if current else None
 
 
-def _context_from_artifact(row: dict[str, Any]) -> dict[str, Any]:
-    """Rebuild the report-Q&A context shape from one persisted artifact row."""
-    return report_context_service.artifact_row_to_context(row)
-
-
 def _normalize_history_turn(item: dict[str, Any]) -> dict[str, str] | None:
     """Return one cleaned chat turn when the role and content are usable."""
     role = str(item.get("role") or "").strip().lower()
@@ -462,7 +457,7 @@ def answer_report_question(
     if not context:
         artifact = fetch_report_artifact(report_key)
         if artifact:
-            context = _context_from_artifact(artifact)
+            context = report_context_service.artifact_row_to_context(artifact)
             store_report_context(report_key, context)
     if not context:
         raise ValueError("Active report context not found. Reload the report and try again.")
