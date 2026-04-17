@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api import register_routers
 from app.db import init_db
@@ -7,6 +8,7 @@ from app.db import init_db
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     application = FastAPI(title="A-share Investment Analysis")
+    application.mount("/static", StaticFiles(directory="app/static"), name="static")
 
     @application.on_event("startup")
     def on_startup() -> None:

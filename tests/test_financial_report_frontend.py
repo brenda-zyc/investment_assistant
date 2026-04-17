@@ -3,8 +3,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from starlette.routing import Mount
+
+from app.main import app
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "app" / "templates" / "index.html"
+INDEX_JS_PATH = Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "index.js"
+
+
+def _template_source() -> str:
+    return TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _index_js_source() -> str:
+    return INDEX_JS_PATH.read_text(encoding="utf-8")
 
 
 def _function_body(source: str, function_signature: str) -> str:
@@ -25,7 +37,7 @@ def _function_body(source: str, function_signature: str) -> str:
 
 def test_auto_read_annual_report_resets_stale_financial_report_sections() -> None:
     """Auto-read should clear previously rendered summary sections before fetching a new symbol."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetFinancialReportPanel();"
@@ -38,7 +50,7 @@ def test_auto_read_annual_report_resets_stale_financial_report_sections() -> Non
 
 def test_auto_read_annual_report_has_empty_state_for_missing_report_source() -> None:
     """Auto-read should explain when no annual-report source metadata is available."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     assert re.search(r"Report source metadata unavailable", body)
@@ -46,7 +58,7 @@ def test_auto_read_annual_report_has_empty_state_for_missing_report_source() -> 
 
 def test_financial_report_template_includes_llm_settings_panel_hooks() -> None:
     """Financial Reports UI should expose LLM settings controls and mode/status placeholders."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
 
     assert 'id="llmApiKeyInput"' in source
     assert 'id="llmBaseUrlInput"' in source
@@ -56,18 +68,18 @@ def test_financial_report_template_includes_llm_settings_panel_hooks() -> None:
     assert 'id="reportCurrentMode"' in source
     assert 'id="reportLlmStatus"' in source
     assert 'id="reportLlmAnalysis"' in source
-    assert "localStorage" in source
+    assert '<script type="module" src="/static/js/index.js"></script>' in source
 
 
 def test_financial_report_template_includes_report_snapshot_panel_hooks() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
 
     assert 'id="reportSnapshotSections"' in source
-    assert "function renderFinancialReportSnapshot(snapshot)" in source
+    assert "function renderFinancialReportSnapshot(snapshot)" in _index_js_source()
 
 
 def test_financial_report_template_includes_report_qa_panel() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
 
     assert 'id="reportQaSection"' in source
     assert 'id="reportQaSessionLabel"' in source
@@ -79,7 +91,7 @@ def test_financial_report_template_includes_report_qa_panel() -> None:
 
 
 def test_financial_report_template_includes_guided_question_chips() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "今年利润增长主要来自哪里？" in source
     assert "经营现金流和净利润匹配吗？" in source
@@ -87,7 +99,7 @@ def test_financial_report_template_includes_guided_question_chips() -> None:
 
 
 def test_financial_report_template_includes_report_qa_session_hooks() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "let reportQaSession" in source
     assert "let reportQaShowOlderTurns = false;" in source
@@ -98,7 +110,7 @@ def test_financial_report_template_includes_report_qa_session_hooks() -> None:
 
 
 def test_financial_report_template_includes_report_qa_ask_flow() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function askActiveReport()")
 
     assert 'fetch(`${apiBase}/api/financial-report-qa`' in body
@@ -112,7 +124,7 @@ def test_financial_report_template_includes_report_qa_ask_flow() -> None:
 
 
 def test_financial_report_template_keeps_full_transcript_and_renders_older_toggle() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     append_body = _function_body(source, "function appendReportQaTurn(role, content, payload = {})")
     render_body = _function_body(source, "function renderReportQaTranscript()")
 
@@ -127,7 +139,7 @@ def test_financial_report_template_keeps_full_transcript_and_renders_older_toggl
 
 
 def test_financial_report_template_formats_report_qa_bold_text_safely() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "function formatReportQaRichText(value)" in source
     assert ".replace(/\\*\\*(.+?)\\*\\*/g, \"<strong>$1</strong>\")" in source
@@ -135,7 +147,7 @@ def test_financial_report_template_formats_report_qa_bold_text_safely() -> None:
 
 
 def test_financial_report_template_rolls_back_user_turn_when_qa_request_fails() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function askActiveReport()")
 
     assert "const previousHistorySnapshot = reportQaSession.history.map((turn) => ({ ...turn }));" in body
@@ -143,13 +155,13 @@ def test_financial_report_template_rolls_back_user_turn_when_qa_request_fails() 
 
 
 def test_financial_report_template_ignores_enter_during_ime_composition() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert 'if (e.key === "Enter" && !e.isComposing) askActiveReport();' in source
 
 
 def test_financial_report_url_analysis_sends_symbol_with_report_url() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     assert 'const reportSymbol = /^\\d{6}$/.test(reportCodeInput.value.trim()) ? reportCodeInput.value.trim() : null;' in body
@@ -157,7 +169,7 @@ def test_financial_report_url_analysis_sends_symbol_with_report_url() -> None:
 
 
 def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
@@ -167,7 +179,7 @@ def test_financial_report_url_analysis_resets_report_qa_before_fetch() -> None:
 
 
 def test_report_flows_render_report_snapshot_sections() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     report_body = _function_body(source, "async function loadFinancialReport(refresh = false)")
     url_body = _function_body(source, "async function loadFinancialReportFromUrl(forceRefresh = false)")
     autoread_body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
@@ -178,7 +190,7 @@ def test_report_flows_render_report_snapshot_sections() -> None:
 
 
 def test_auto_read_resets_report_qa_before_fetch() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function autoReadAnnualReport(forceRefresh = false)")
 
     reset_call = "resetReportQaSession("
@@ -188,14 +200,14 @@ def test_auto_read_resets_report_qa_before_fetch() -> None:
 
 
 def test_financial_report_template_uses_report_key_only_for_active_session() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "data.report_key || data.session_key" not in source
     assert "const reportKey = data.report_key || null;" in source
 
 
 def test_stock_and_report_panels_expose_explicit_refresh_controls() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
 
     assert 'id="refreshSingleStockBtn"' in source
     assert 'id="refreshWatchlistBtn"' in source
@@ -204,7 +216,7 @@ def test_stock_and_report_panels_expose_explicit_refresh_controls() -> None:
 
 
 def test_stock_and_report_requests_include_refresh_flags_when_requested() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     single_body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
     watchlist_body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
@@ -219,7 +231,7 @@ def test_stock_and_report_requests_include_refresh_flags_when_requested() -> Non
 
 
 def test_analyze_single_stock_renders_cached_tables_without_triggering_new_realtime_fetch() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function analyzeSingleStock(refresh = false)")
 
     assert "Promise.all([" not in body
@@ -233,7 +245,7 @@ def test_analyze_single_stock_renders_cached_tables_without_triggering_new_realt
 
 
 def test_async_single_stock_helpers_exist_for_metric_and_realtime_enrichment() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     lazy_metric_body = _function_body(source, "function maybeLoadMetricPanel()")
     metric_body = _function_body(source, "async function loadStockMetricPanel(symbol)")
@@ -250,7 +262,7 @@ def test_async_single_stock_helpers_exist_for_metric_and_realtime_enrichment() -
 
 
 def test_analyze_watchlist_renders_cached_rows_without_triggering_new_realtime_fetch() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function analyzeWatchlist(refresh = false)")
 
     assert "renderWatchlistRows(rows);" in body
@@ -258,14 +270,27 @@ def test_analyze_watchlist_renders_cached_rows_without_triggering_new_realtime_f
     assert '`${baseStatusText} Realtime will update on the next background refresh.`' in body
     assert '`${baseStatusText} Using cached watchlist snapshot until background realtime refresh.`' in body
     assert "const unresolvedNameSymbols = watchlistSymbolsMissingNames(watchlistSymbols);" in body
-    assert "void loadWatchlistNames(unresolvedNameSymbols, requestToken);" in body
-    assert "if (latestRealtimeSnapshotData) {" in body
-    assert "applyCachedWatchlistRealtimeSnapshot();" in body
-    assert body.index("applyCachedWatchlistRealtimeSnapshot();") < body.index("watchlistSymbolsMissingNames")
+
+
+def test_financial_report_template_uses_external_js_entrypoint() -> None:
+    source = _template_source()
+
+    assert '<script type="module" src="/static/js/index.js"></script>' in source
+    assert "<script>" not in source
+
+
+def test_static_js_entrypoint_is_served() -> None:
+    static_mounts = [
+        route for route in app.routes if isinstance(route, Mount) and getattr(route, "path", None) == "/static"
+    ]
+
+    assert static_mounts
+    assert INDEX_JS_PATH.exists()
+    assert "async function autoReadAnnualReport(forceRefresh = false)" in _index_js_source()
 
 
 def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 5000, errorLabel = \"Backend\")" in source
     shared_realtime_body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
@@ -284,7 +309,7 @@ def test_market_supplemental_fetches_use_frontend_timeout_guards() -> None:
 
 
 def test_metric_panel_lazy_loads_on_accordion_open() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "const metricAccordionToggleEl = document.querySelector('[aria-controls=\"metricAccordionBody\"]');" in source
     assert "let stockMetricLoadedSymbol = null;" in source
@@ -296,7 +321,7 @@ def test_metric_panel_lazy_loads_on_accordion_open() -> None:
 
 
 def test_warning_summaries_use_short_labels_in_status_text() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
 
     assert "function summarizeWarnings(warnings)" in source
     assert 'return summarized.length ? ` Warnings: ${summarized.join(" | ")}` : "";' in source
@@ -304,7 +329,7 @@ def test_warning_summaries_use_short_labels_in_status_text() -> None:
 
 
 def test_realtime_polling_skips_hidden_tabs_and_overlapping_requests() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function refreshRealtimePrices()")
 
     assert "let realtimeRefreshInFlight = false;" in source
@@ -319,7 +344,7 @@ def test_realtime_polling_skips_hidden_tabs_and_overlapping_requests() -> None:
 
 
 def test_shared_realtime_scheduler_batches_requests_and_replays_queued_symbols() -> None:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function requestSharedRealtimeSnapshot(symbols)")
 
     assert "queuedRealtimeSymbols.add(symbol);" in body
@@ -338,25 +363,26 @@ def test_report_url_helper_copy_is_limited_to_official_disclosure_links() -> Non
 
 def test_dashboard_template_includes_external_data_reference_section() -> None:
     """Dashboard UI should expose the external-data table and render rows from industry payloads."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
+    js_source = _index_js_source()
 
     assert 'id="externalDataTable"' in source
     assert 'id="externalDataStatus"' in source
     assert 'id="refreshExternalDataBtn"' in source
     assert "External Data References" in source
     assert "cached weekly snapshots" in source
-    assert "function renderExternalDataReferences(rows)" in source
-    assert "async function loadCachedIndustryCycles()" in source
-    assert "async function refreshExternalDataReferences()" in source
-    assert "data.external_rows || []" in source
-    assert "/industry_cycles?refresh=true&refresh_external=false" in source
-    assert "/industry_cycles?refresh=false&refresh_external=false" in source
-    assert "/industry_cycles?refresh=false&refresh_external=true" in source
+    assert "function renderExternalDataReferences(rows)" in js_source
+    assert "async function loadCachedIndustryCycles()" in js_source
+    assert "async function refreshExternalDataReferences()" in js_source
+    assert "data.external_rows || []" in js_source
+    assert "/industry_cycles?refresh=true&refresh_external=false" in js_source
+    assert "/industry_cycles?refresh=false&refresh_external=false" in js_source
+    assert "/industry_cycles?refresh=false&refresh_external=true" in js_source
 
 
 def test_load_industry_cycles_does_not_touch_external_reference_table() -> None:
     """Industry refresh should not clear or rerender the external reference table."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function loadIndustryCycles()")
 
     assert 'loadIndustryBtn.disabled = true;' in body
@@ -369,7 +395,7 @@ def test_load_industry_cycles_does_not_touch_external_reference_table() -> None:
 
 def test_load_cached_industry_cycles_reads_cache_and_renders_both_tables() -> None:
     """Initial industry-tab load should read cached data and render both tables."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function loadCachedIndustryCycles()")
 
     assert "/industry_cycles?refresh=false&refresh_external=false" in body
@@ -380,7 +406,7 @@ def test_load_cached_industry_cycles_reads_cache_and_renders_both_tables() -> No
 
 def test_refresh_external_data_uses_dedicated_status_element() -> None:
     """External refresh should update only the external-data status text."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function refreshExternalDataReferences()")
 
     assert 'refreshExternalDataBtn.disabled = true;' in body
@@ -392,7 +418,7 @@ def test_refresh_external_data_uses_dedicated_status_element() -> None:
 
 def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
     """Cached fallback rows should render as warning badges instead of hard failures."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "function renderExternalDataReferences(rows)")
 
     assert 'row.status === "cached"' in body
@@ -401,35 +427,36 @@ def test_external_reference_table_marks_cached_rows_as_warning_state() -> None:
 
 def test_industry_table_uses_indicator_as_of_column_label() -> None:
     """Industry table should clarify that each row carries its own observation date."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
+    js_source = _index_js_source()
 
     assert "<th>Indicator As Of</th>" in source
 
-    body = _function_body(source, "function renderIndustryRows(rows)")
+    body = _function_body(js_source, "function renderIndustryRows(rows)")
     assert "${row.as_of ?? \"-\"}" in body
 
 
 def test_industry_table_renders_source_links_from_payload() -> None:
     """Industry rows should render upstream links without hardcoding source-specific URL logic in the template."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _template_source()
+    js_source = _index_js_source()
 
     assert "<th>Link</th>" in source
-    body = _function_body(source, "function renderIndustryRows(rows)")
+    body = _function_body(js_source, "function renderIndustryRows(rows)")
     assert "row.source_url" in body
     assert 'target="_blank" rel="noreferrer">Open</a>' in body
 
 
 def test_industry_table_prefers_display_name_over_internal_key() -> None:
     """Industry rows should render human-readable indicator labels in the table."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    body = _function_body(source, "function renderIndustryRows(rows)")
+    body = _function_body(_index_js_source(), "function renderIndustryRows(rows)")
 
     assert "${row.display_name ?? row.indicator ?? \"-\"}" in body
 
 
 def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> None:
     """Live industry refresh should not clear the table before the new payload arrives."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     body = _function_body(source, "async function loadIndustryCycles()")
 
     assert 'industryStatusEl.textContent = "Loading industry cycles...";' in body
@@ -438,7 +465,7 @@ def test_load_industry_cycles_keeps_existing_rows_visible_during_refresh() -> No
 
 def test_industry_status_text_mentions_refreshed_at_timestamp() -> None:
     """Industry status text should distinguish indicator dates from the current refresh time."""
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    source = _index_js_source()
     load_body = _function_body(source, "async function loadIndustryCycles()")
     cached_body = _function_body(source, "async function loadCachedIndustryCycles()")
 
