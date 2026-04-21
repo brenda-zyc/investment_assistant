@@ -1,0 +1,1297 @@
+{
+  "project": "investment_assistant",
+  "version": "1.0",
+  "last_updated": "2026-04-21",
+  "description": "Local-first A-share investment research assistant with market analysis, macro indicators, industry cycle tracking, financial report reading, and report Q&A.",
+  "design_principles": [
+    "Use structured repo artifacts instead of chat history as the long-running source of truth.",
+    "Keep planning state separate from execution rules and separate from stage summaries.",
+    "Prefer conservative status reporting over optimistic completion claims.",
+    "Keep status and verification evidence separate by using both status and passes.",
+    "Use existing repo specs, decisions, plans, tests, and code areas as the evidence layer.",
+    "Keep the planning file as an index and state map, not as a narrative log."
+  ],
+  "working_rules": {
+    "planning_source_of_truth": "docs/planning/feature_list.json",
+    "execution_rules_document": "AGENT_HARNESS.md",
+    "session_progress_log": "docs/planning/progress.md",
+    "one_feature_at_a_time": true,
+    "do_not_set_passes_true_without_verification": true,
+    "planning_only_requests_do_not_change_app_code": true,
+    "update_progress_log_on_session_handoff": true
+  },
+  "status_definitions": {
+    "not_started": "The work item is accepted into planning but implementation has not started.",
+    "in_progress": "The work item is actively being implemented, refined, or validated.",
+    "blocked": "The work item cannot continue until an identified dependency or decision is resolved.",
+    "completed": "The planned implementation work is believed to be done, but this does not automatically imply full verification.",
+    "passes": "True only when the documented acceptance checks have verification evidence."
+  },
+  "priority_definitions": {
+    "P0": "Critical for current workflow continuity, correctness, or project control.",
+    "P1": "Important product or reliability work that should follow soon after P0.",
+    "P2": "Useful improvement work that is valuable but not immediately blocking.",
+    "P3": "Optional or later-stage improvement work."
+  },
+  "source_documents": {
+    "handoff": "/Users/brenda/Projects/investment_assistant/docs/handoff.md",
+    "testing": "/Users/brenda/Projects/investment_assistant/TESTING.md",
+    "spec_root": "/Users/brenda/Projects/investment_assistant/.kiro/specs",
+    "decision_root": "/Users/brenda/Projects/investment_assistant/docs/decisions",
+    "plan_root": "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans"
+  },
+  "epics": [
+    {
+      "id": "DELIVERY",
+      "title": "Planning, harness, and handoff discipline",
+      "priority": "P0"
+    },
+    {
+      "id": "MARKET_ANALYSIS",
+      "title": "Single-symbol and watchlist market analysis flows",
+      "priority": "P0"
+    },
+    {
+      "id": "MACRO_INDICATORS",
+      "title": "Macro indicator dashboards and signals",
+      "priority": "P1"
+    },
+    {
+      "id": "INDUSTRY_CYCLES",
+      "title": "Industry cycle indicators, provenance, and fallback semantics",
+      "priority": "P0"
+    },
+    {
+      "id": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Financial report loading, reading, and artifact persistence",
+      "priority": "P0"
+    },
+    {
+      "id": "REPORT_QA_AND_LLM",
+      "title": "Ask-the-Report dialogue behavior, scope handling, and LLM assistance",
+      "priority": "P0"
+    },
+    {
+      "id": "RELIABILITY_AND_PERFORMANCE",
+      "title": "Cross-cutting resilience, cache behavior, and verification work",
+      "priority": "P0"
+    },
+    {
+      "id": "FRONTEND_AND_OPERATOR_EXPERIENCE",
+      "title": "Operator-facing UX clarity and frontend maintainability",
+      "priority": "P1"
+    }
+  ],
+  "features": [
+    {
+      "id": "DELIVERY_001",
+      "epic": "DELIVERY",
+      "title": "Create structured planning source of truth",
+      "category": "workflow",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Create the first durable planning JSON with governance metadata, epics, and executable work items.",
+      "current_state": "The v1 planning file exists and reflects the approved English structure for governance, epics, and feature inventory.",
+      "next_action": "Use this file as the canonical planning index for future repo work.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-21-planning-harness-foundation-design.md"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-21-planning-harness-foundation.md"
+        ],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/docs/planning/feature_list.json"
+        ],
+        "tests": []
+      },
+      "acceptance_checks": [
+        "The planning file exists at docs/planning/feature_list.json.",
+        "The file is valid JSON.",
+        "The file contains the approved governance fields, epics, and initial feature inventory."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "python -m json.tool /Users/brenda/Projects/investment_assistant/docs/planning/feature_list.json >/dev/null"
+        ],
+        "manual": [
+          "Reviewed against the approved planning foundation design during inline execution."
+        ],
+        "notes": "This record was updated from in_progress to completed when the file was generated and validated."
+      }
+    },
+    {
+      "id": "DELIVERY_002",
+      "epic": "DELIVERY",
+      "title": "Add agent harness rules for planning, verification, and handoff",
+      "category": "workflow",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Create a dedicated harness document that defines how future agent work should use the planning foundation.",
+      "current_state": "The harness file exists in English and describes pre-flight, execution, verification, handoff, and future request patterns.",
+      "next_action": "Use the harness as the execution companion to feature_list.json for future sessions.",
+      "depends_on": [
+        "DELIVERY_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-21-planning-harness-foundation-design.md"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-21-planning-harness-foundation.md"
+        ],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/AGENT_HARNESS.md"
+        ],
+        "tests": []
+      },
+      "acceptance_checks": [
+        "AGENT_HARNESS.md exists at the repo root.",
+        "The file describes pre-flight, execution, verification, handoff, and future request patterns.",
+        "The file does not duplicate the full feature inventory from feature_list.json."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "rg -n \"feature_list.json|progress.md|passes|one feature at a time|How To Ask For Future Extensions\" /Users/brenda/Projects/investment_assistant/AGENT_HARNESS.md"
+        ],
+        "manual": [
+          "Reviewed to ensure the harness focuses on workflow discipline instead of duplicating per-feature state."
+        ],
+        "notes": "This record was updated from not_started to completed when the harness file was created."
+      }
+    },
+    {
+      "id": "DELIVERY_003",
+      "epic": "DELIVERY",
+      "title": "Maintain session-level progress log for agent handoff",
+      "category": "workflow",
+      "priority": "P1",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Create a lightweight progress log for short session-level handoff notes that complements docs/handoff.md.",
+      "current_state": "The progress log exists with a reusable entry template and an initial handoff entry for the planning foundation session.",
+      "next_action": "Append short session entries here instead of overloading docs/handoff.md.",
+      "depends_on": [
+        "DELIVERY_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-21-planning-harness-foundation-design.md"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-21-planning-harness-foundation.md"
+        ],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/docs/planning/progress.md"
+        ],
+        "tests": []
+      },
+      "acceptance_checks": [
+        "The progress log exists at docs/planning/progress.md.",
+        "The file includes a reusable entry template.",
+        "The file is positioned as a session-level log rather than a replacement for docs/handoff.md."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "ls -la /Users/brenda/Projects/investment_assistant/docs/planning"
+        ],
+        "manual": [
+          "Reviewed the file to confirm that it contains the expected template and current-session seed entry."
+        ],
+        "notes": "This record was updated from not_started to completed when the progress log file was created."
+      }
+    },
+    {
+      "id": "MARKET_001",
+      "epic": "MARKET_ANALYSIS",
+      "title": "Single-symbol analysis baseline",
+      "category": "functional",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Provide the baseline single-symbol analysis flow for market data and financial summary inspection.",
+      "current_state": "The single-symbol flow is present in the app, but this planning file does not yet attach a focused fresh verification artifact to the baseline feature itself.",
+      "next_action": "Attach a focused regression or smoke result if the baseline single-symbol flow becomes an active work area again.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/api/market_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/market_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/stock.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_market_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "A single symbol request returns price data and financial summary content.",
+        "The single-stock UI renders without frontend JSON parse failures.",
+        "The baseline flow remains compatible with later cache-first improvements."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Implemented surface exists, but this record intentionally keeps passes=false until dedicated evidence is attached."
+      }
+    },
+    {
+      "id": "MARKET_002",
+      "epic": "MARKET_ANALYSIS",
+      "title": "Bounded concurrent watchlist fetch",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Run watchlist analysis with bounded concurrency while preserving compatibility, order, and partial-failure behavior.",
+      "current_state": "The bounded watchlist flow is implemented and documented with deterministic coverage for order preservation, deduplication, worker isolation, and warning-path behavior.",
+      "next_action": "Keep this feature stable while adjacent cache-first and refresh work evolves.",
+      "depends_on": [
+        "MARKET_001",
+        "RELIABILITY_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/bounded-watchlist-fetch"
+        ],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/usecases/market_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/market_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/db.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/stock.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_market_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_db.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Watchlist requests preserve first-seen symbol order.",
+        "Duplicate symbols do not produce duplicate work rows.",
+        "Worker failure for one symbol degrades gracefully without breaking the full response."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "The bounded-watchlist spec tasks and handoff note deterministic coverage for order preservation, deduplication, worker failure isolation, and warning behavior."
+        ],
+        "manual": [],
+        "notes": "Later cache-first work builds on this feature rather than replacing it."
+      }
+    },
+    {
+      "id": "MARKET_003",
+      "epic": "MARKET_ANALYSIS",
+      "title": "Cache-first stock and watchlist reads with explicit refresh",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Make stock and watchlist analysis cache-first by default and expose refresh as an explicit operator action.",
+      "current_state": "The Version B cache-first behavior is implemented and documented as complete, with additional manual smoke testing still recommended for adjacent refresh flows.",
+      "next_action": "Run the planned browser smoke checks when this path is touched again or before a broader release milestone.",
+      "depends_on": [
+        "MARKET_001",
+        "MARKET_002",
+        "RELIABILITY_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-11-version-b-cache-and-artifacts.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/usecases/market_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/market_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/stock.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_market_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Single-symbol and watchlist reads use cached data by default when available.",
+        "Refresh remains explicit rather than implicit on every read.",
+        "Cache-first behavior keeps the existing response shape compatible for callers."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "Version B focused regression modules passed: 85 passed.",
+          "Full repository suite passed: 187 passed."
+        ],
+        "manual": [
+          "docs/handoff.md still recommends browser smoke checks for refresh-path behavior."
+        ],
+        "notes": "Manual smoke is still recommended for adjacent flows, but the implementation has strong automated evidence."
+      }
+    },
+    {
+      "id": "MACRO_001",
+      "epic": "MACRO_INDICATORS",
+      "title": "Macro indicators dashboard baseline",
+      "category": "functional",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Provide macro indicator tables, signals, and valuation views in the dashboard.",
+      "current_state": "The macro dashboard exists, but this planning file does not yet attach a current dedicated verification artifact for the baseline surface.",
+      "next_action": "Attach a focused smoke or regression result if macro work becomes active again.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/api/macro_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/macro.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_fetch_macro_indicators_script.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Selected macro tables load rows.",
+        "Signal and valuation panels render coherent content.",
+        "Empty states remain explicit instead of silent."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Kept conservative until a fresh macro-specific verification artifact is attached."
+      }
+    },
+    {
+      "id": "INDUSTRY_001",
+      "epic": "INDUSTRY_CYCLES",
+      "title": "Industry cycles dashboard baseline",
+      "category": "functional",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Provide the baseline industry cycles table and grouped indicator views.",
+      "current_state": "The industry dashboard exists, but this planning record does not yet attach a fresh dedicated verification artifact for the baseline experience.",
+      "next_action": "Attach focused verification when industry work becomes active again.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/api/industry_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/industry_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/industry.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_industry_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Industry rows render in the dashboard.",
+        "Grouped sections remain readable.",
+        "Industry data can coexist with partial upstream failure signaling."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Kept conservative until a fresh industry baseline verification artifact is attached."
+      }
+    },
+    {
+      "id": "INDUSTRY_002",
+      "epic": "INDUSTRY_CYCLES",
+      "title": "Expose industry diagnostics with source, status, and error",
+      "category": "reliability",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Surface industry provenance and degraded-state diagnostics through source, status, and error fields.",
+      "current_state": "The diagnostics fields are described as implemented in handoff, but this planning file keeps verification conservative until the current payload behavior is re-checked directly.",
+      "next_action": "Run focused industry service/usecase verification when touching this area again.",
+      "depends_on": [
+        "INDUSTRY_001"
+      ],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/industry_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/industry_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/industry.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_industry_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_industry_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Industry responses expose coherent source, status, and error fields.",
+        "Degraded upstream behavior is visible rather than silent.",
+        "The UI can render those diagnostics without breaking row presentation."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "The feature is clearly implemented, but this record keeps passes=false until the current behavior is re-verified."
+      }
+    },
+    {
+      "id": "INDUSTRY_003",
+      "epic": "INDUSTRY_CYCLES",
+      "title": "Industry data reliability cleanup",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "not_started",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Tighten parser validation, normalize fallback semantics, and improve provenance display for industry data.",
+      "current_state": "The feature is fully specified and backed by a decision record, but the work remains planned rather than implemented in the current main workspace.",
+      "next_action": "Implement the approved industry-data-reliability spec and attach focused service/usecase/frontend verification.",
+      "depends_on": [
+        "INDUSTRY_001",
+        "INDUSTRY_002"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/industry-data-reliability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-10-industry-data-reliability-design.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-10-industry-data-reliability.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/industry_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/industry_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/industry.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_industry_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_industry_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Suspicious source values are rejected instead of shown as successful refresh results.",
+        "Blocked, cached, stale, fetch_failed, and no_data states are distinguishable and coherent.",
+        "Industry rows expose readable names and source links in the UI."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "This is a planned reliability improvement with a clear spec and decision record, not a completed implementation."
+      }
+    },
+    {
+      "id": "REPORT_001",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Financial report summary baseline",
+      "category": "functional",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Provide the baseline financial report summary view in the dashboard.",
+      "current_state": "The report summary flow exists, but this planning record does not yet attach a fresh dedicated verification artifact for the baseline surface by itself.",
+      "next_action": "Attach focused report-summary verification if this baseline flow becomes an active change area again.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/financial_report_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py"
+        ]
+      },
+      "acceptance_checks": [
+        "The report summary request returns coherent JSON.",
+        "Highlights, evidence, and tabular content render in the dashboard.",
+        "The baseline summary path remains compatible with later auto-read and cache-first work."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Kept conservative until a fresh report-summary-specific verification artifact is attached."
+      }
+    },
+    {
+      "id": "REPORT_002",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Autonomous annual-report reading",
+      "category": "functional",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Automatically discover the latest annual report, extract report-level metrics, and answer core profit-quality questions.",
+      "current_state": "The annual-report auto-read flow is implemented and documented as a completed feature with deterministic extraction and scoring coverage.",
+      "next_action": "Preserve this feature while refining downstream artifact reuse and report-QA behavior.",
+      "depends_on": [
+        "REPORT_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/financial-report-autoread"
+        ],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/financial_report_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/market_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/core_logic.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_text_parser.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_core_logic.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "The system can discover the latest annual report for a symbol automatically.",
+        "The report pipeline extracts profit-quality and capital-intensity metrics where available.",
+        "The auto-read flow answers the three core report questions in a deterministic baseline mode."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "The financial-report-autoread spec tasks record deterministic tests for discovery selection, extraction, and three-question scoring."
+        ],
+        "manual": [],
+        "notes": "The feature is mature enough to treat as passing in the planning inventory."
+      }
+    },
+    {
+      "id": "REPORT_003",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "LLM-assisted report interpretation with session config",
+      "category": "functional",
+      "priority": "P1",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Add optional LLM interpretation for auto-read results with browser-persisted settings and backend session config.",
+      "current_state": "The LLM enhancement is implemented with session config, masked status, and test-connection behavior, while keeping the deterministic rule pipeline as the primary baseline.",
+      "next_action": "Keep this feature stable and avoid broadening scope beyond the approved current-stage configuration boundary without a new decision.",
+      "depends_on": [
+        "REPORT_002"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/llm-autoread-enhancement"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-03-31-llm-autoread-enhancement.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-03-31-llm-autoread-config.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/llm_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_llm_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Browser-persisted settings can be synced into backend session memory.",
+        "The backend can report masked session status and test connectivity.",
+        "Optional LLM interpretation enhances rather than replaces the deterministic report pipeline."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "The llm-autoread-enhancement spec tasks record targeted tests for mode labeling, LLM session config, and fallback behavior."
+        ],
+        "manual": [],
+        "notes": "The chosen configuration boundary is documented in the 2026-03-31 decision record."
+      }
+    },
+    {
+      "id": "REPORT_004",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Persist report artifacts in SQLite",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Persist reusable report artifacts in SQLite so report context can survive process restarts and support later flows.",
+      "current_state": "Report artifact persistence is implemented as part of Version B and is now the durable foundation for downstream report reuse and QA continuity.",
+      "next_action": "Keep artifact schema and reuse paths stable while higher-level report features continue to evolve.",
+      "depends_on": [
+        "REPORT_002",
+        "RELIABILITY_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-11-version-b-cache-and-artifacts.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/db.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/report_context_service.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_db.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_context_service.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Parsed report artifacts are stored in SQLite with reusable context data.",
+        "Auto-read and related report flows can reuse stored artifacts when refresh is not forced.",
+        "Persisted artifacts provide a durable fallback for later report-QA reload."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "Version B focused regression modules passed: 85 passed.",
+          "Full repository suite passed: 187 passed.",
+          "python -m compileall app completed successfully."
+        ],
+        "manual": [],
+        "notes": "This feature is a core part of the Version B cache-and-artifacts decision."
+      }
+    },
+    {
+      "id": "REPORT_005",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Cache-first report loading with explicit refresh controls",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Make report loading cache-first by default and separate normal read actions from explicit refresh actions.",
+      "current_state": "The cache-first report-loading flow is implemented in Version B and exposed in the frontend with explicit refresh controls and clearer operator copy.",
+      "next_action": "Run the planned browser smoke checks before treating refresh-path UX as fully settled.",
+      "depends_on": [
+        "REPORT_001",
+        "REPORT_004"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-11-version-b-cache-and-artifacts.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Report summary loads cached data by default when available.",
+        "Refresh and force_refresh remain explicit controls instead of implicit read behavior.",
+        "The Financial Reports UI distinguishes cached reads from refresh actions."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "Version B focused regression modules passed: 85 passed.",
+          "Full repository suite passed: 187 passed."
+        ],
+        "manual": [
+          "docs/handoff.md still recommends manual browser smoke checks for explicit refresh flows."
+        ],
+        "notes": "Automated evidence is strong; additional manual smoke remains recommended for operator confidence."
+      }
+    },
+    {
+      "id": "REPORT_006",
+      "epic": "FINANCIAL_REPORT_ANALYSIS",
+      "title": "Shared report context mapping cleanup",
+      "category": "quality",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Unify report artifact and context mapping logic so financial report usecases and report QA stop carrying duplicate conversion code.",
+      "current_state": "The shared mapper exists in code and recent refactors landed, but this planning record keeps verification conservative until the focused context-mapper regressions are explicitly rechecked and linked here.",
+      "next_action": "Run focused report-context, report-QA, and financial-report usecase verification and then update this record.",
+      "depends_on": [
+        "REPORT_004"
+      ],
+      "source_refs": {
+        "specs": [],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-17-financial-report-context-unification.md"
+        ],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/report_context_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_context_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "A shared mapper exists for report key creation and artifact/context conversion.",
+        "Report QA and financial report usecases rely on the shared mapper instead of duplicating conversion logic.",
+        "Focused regression checks confirm that persistence and reload behavior remain correct."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Recent commits suggest the refactor landed, but this record stays conservative until the focused verification is attached."
+      }
+    },
+    {
+      "id": "REPORT_QA_001",
+      "epic": "REPORT_QA_AND_LLM",
+      "title": "Inline Ask-the-Report panel",
+      "category": "functional",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Provide an inline report-QA panel with transcript state, guided chips, and report-scoped question handling.",
+      "current_state": "The Ask-the-Report panel is described as implemented in handoff and remains an active product surface for report exploration.",
+      "next_action": "Keep this feature stable while dialogue regression and scope-tightening work continues.",
+      "depends_on": [
+        "REPORT_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/report-qa"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-01-report-qa.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-01-report-qa-scope.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/usecases/financial_report_usecase.py",
+          "/Users/brenda/Projects/investment_assistant/app/api/financial_report_api.py",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py"
+        ]
+      },
+      "acceptance_checks": [
+        "The Financial Reports area exposes an inline Ask-the-Report panel.",
+        "Guided question chips and transcript rendering work within the report context.",
+        "The session resets when the active report changes."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "The original report-qa delivery added backend and frontend tests for request handling, history, chips, and transcript behavior."
+        ],
+        "manual": [],
+        "notes": "The planning file treats the original report-QA delivery as passing based on the implemented surface and accompanying test additions."
+      }
+    },
+    {
+      "id": "REPORT_QA_002",
+      "epic": "REPORT_QA_AND_LLM",
+      "title": "Artifact-backed report QA continuity after restart",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Allow report-QA context to survive backend restarts by rehydrating from persisted report artifacts.",
+      "current_state": "Artifact-backed report-QA continuity is implemented as part of Version B and is the authoritative persisted fallback when process memory is empty.",
+      "next_action": "Preserve this behavior while continuing dialogue-regression and scope-tightening work.",
+      "depends_on": [
+        "REPORT_004",
+        "REPORT_QA_001"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/report-qa",
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-01-report-qa.md",
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-01-report-qa-scope.md",
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-11-version-b-cache-and-artifacts.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/report_context_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/db.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_context_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Report QA can reload report context from persisted artifacts after process restart.",
+        "Persisted artifact rows contain enough context for report-QA fallback.",
+        "Process-memory cache becomes a hot cache rather than the sole source of truth."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "Version B focused regression modules passed: 85 passed.",
+          "Full repository suite passed: 187 passed."
+        ],
+        "manual": [],
+        "notes": "docs/handoff.md explicitly records that report-QA backend/frontend state now survives backend restarts as long as the report_artifacts row exists."
+      }
+    },
+    {
+      "id": "REPORT_QA_003",
+      "epic": "REPORT_QA_AND_LLM",
+      "title": "Dialogue regression coverage for report QA",
+      "category": "quality",
+      "priority": "P0",
+      "status": "in_progress",
+      "passes": false,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Add dialogue-style regression coverage for report-QA turns so follow-ups and hybrid answers remain stable over time.",
+      "current_state": "A dedicated design and implementation plan exist, and recent report-QA dialogue work has started, but this record still needs a clean targeted verification pass and final state update.",
+      "next_action": "Run the targeted report-QA dialogue regressions and then decide whether this feature is completed or still in flight.",
+      "depends_on": [
+        "REPORT_QA_001",
+        "REPORT_QA_002"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-17-report-qa-dialogue-regression-design.md"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-17-report-qa-dialogue-regression.md"
+        ],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Dialogue-style regressions cover rule-only, hybrid, and follow-up report-QA flows.",
+        "The test harness makes session-style report-QA regressions easy to extend.",
+        "Targeted report-QA regression runs pass with the new dialogue coverage enabled."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "The planning inventory keeps this feature in_progress until the dialogue-regression verification is explicitly attached."
+      }
+    },
+    {
+      "id": "REPORT_QA_004",
+      "epic": "REPORT_QA_AND_LLM",
+      "title": "Out-of-report question routing and scope tightening",
+      "category": "quality",
+      "priority": "P0",
+      "status": "in_progress",
+      "passes": false,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Tighten report-scope detection and support general out-of-report answers without polluting report-session memory.",
+      "current_state": "Scope-detection tightening and out-of-report routing are still being finalized alongside dialogue-regression work, so the product behavior is not yet treated as fully settled.",
+      "next_action": "Confirm final behavior and targeted tests before moving this record out of in_progress.",
+      "depends_on": [
+        "REPORT_QA_001",
+        "REPORT_QA_002"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-17-report-qa-dialogue-regression-design.md"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-17-report-qa-dialogue-regression.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-01-report-qa-scope.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/llm_service.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Clearly out-of-report questions are not incorrectly forced through report-only answer logic.",
+        "General answers for out-of-scope turns do not pollute report-session memory.",
+        "Targeted tests cover the chosen routing boundary and preserve report-session continuity."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "This remains in_progress because the final product boundary still needs explicit verification."
+      }
+    },
+    {
+      "id": "RELIABILITY_001",
+      "epic": "RELIABILITY_AND_PERFORMANCE",
+      "title": "SQLite contention mitigation",
+      "category": "reliability",
+      "priority": "P0",
+      "status": "completed",
+      "passes": true,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Reduce SQLite contention risk by adding timeout and busy-timeout behavior for concurrent flows.",
+      "current_state": "SQLite timeout and busy-timeout mitigation is implemented and forms part of the repo's current stability baseline.",
+      "next_action": "Preserve the mitigation while higher-level cache and artifact flows continue to evolve.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/db.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_db.py"
+        ]
+      },
+      "acceptance_checks": [
+        "SQLite connections use timeout settings appropriate for short-lived concurrent writes.",
+        "Busy-timeout behavior reduces lock-contention failures in bounded parallel flows.",
+        "The mitigation remains compatible with later report-artifact persistence work."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "The feature is called out as completed in docs/handoff.md and is covered by direct db tests plus later full-suite verification."
+        ],
+        "manual": [],
+        "notes": "This mitigation predates Version B but remains part of the current verified stability foundation."
+      }
+    },
+    {
+      "id": "RELIABILITY_002",
+      "epic": "RELIABILITY_AND_PERFORMANCE",
+      "title": "Smoke verification for cache-first and refresh flows",
+      "category": "quality",
+      "priority": "P0",
+      "status": "not_started",
+      "passes": false,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Run the recommended browser smoke path for cache-first and explicit-refresh flows so operator behavior is confirmed end to end.",
+      "current_state": "The handoff explicitly recommends this work, but the browser smoke pass has not yet been captured as a completed artifact in the planning inventory.",
+      "next_action": "Execute the recommended browser smoke path from docs/handoff.md and attach the result here.",
+      "depends_on": [
+        "MARKET_003",
+        "REPORT_005",
+        "REPORT_QA_002"
+      ],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/static/js/stock.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/TESTING.md"
+        ]
+      },
+      "acceptance_checks": [
+        "The documented smoke path for cached reads and explicit refresh completes successfully in the browser.",
+        "The second auto-read reuses the stored artifact as expected.",
+        "A report question after app restart still works from the persisted artifact path."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "This is an explicitly recommended next step from docs/handoff.md rather than already completed work."
+      }
+    },
+    {
+      "id": "RELIABILITY_003",
+      "epic": "RELIABILITY_AND_PERFORMANCE",
+      "title": "Fast-fail or DNS preflight for unstable upstream sources",
+      "category": "reliability",
+      "priority": "P1",
+      "status": "not_started",
+      "passes": false,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Reduce wasted latency on unstable upstream requests by adding preflight or fast-fail behavior for known DNS and provider issues.",
+      "current_state": "This remains a recommended follow-up idea rather than a committed implementation in the current main workspace.",
+      "next_action": "Turn this recommendation into a scoped spec when refresh-path latency becomes the next active reliability priority.",
+      "depends_on": [
+        "RELIABILITY_002"
+      ],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/services/market_data_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/financial_report_service.py",
+          "/Users/brenda/Projects/investment_assistant/app/services/common.py"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/TESTING.md"
+        ]
+      },
+      "acceptance_checks": [
+        "Known DNS or upstream failures fail quickly instead of consuming the full slow path.",
+        "The system reports clear degraded-state information when fast-fail is triggered.",
+        "The change measurably improves refresh-path latency under unstable upstream conditions."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "This is a future reliability candidate rather than active implemented work."
+      }
+    },
+    {
+      "id": "UX_001",
+      "epic": "FRONTEND_AND_OPERATOR_EXPERIENCE",
+      "title": "Frontend dashboard script modularization",
+      "category": "quality",
+      "priority": "P1",
+      "status": "completed",
+      "passes": false,
+      "user_visible": false,
+      "last_updated": "2026-04-21",
+      "summary": "Split the dashboard frontend script into smaller focused JS modules for maintainability.",
+      "current_state": "The dashboard script has already been decomposed into focused frontend modules, but this planning record does not yet attach a dedicated post-refactor verification artifact.",
+      "next_action": "Attach focused smoke or frontend regression evidence if the modularized frontend becomes an active change area again.",
+      "depends_on": [],
+      "source_refs": {
+        "specs": [],
+        "plans": [],
+        "decisions": [],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/static/js/index.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/core.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/stock.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/macro.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/industry.js",
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py"
+        ]
+      },
+      "acceptance_checks": [
+        "Dashboard frontend logic is split into focused module files.",
+        "The modularization preserves existing operator-facing behavior.",
+        "The refactor improves code locality without breaking main dashboard flows."
+      ],
+      "verification_evidence": {
+        "automated": [],
+        "manual": [],
+        "notes": "Recent refactor commits make the implementation clear, but the planning file keeps passes=false until dedicated evidence is linked."
+      }
+    },
+    {
+      "id": "UX_002",
+      "epic": "FRONTEND_AND_OPERATOR_EXPERIENCE",
+      "title": "Refresh controls and official-disclosure-only copy clarity",
+      "category": "ux",
+      "priority": "P1",
+      "status": "completed",
+      "passes": true,
+      "user_visible": true,
+      "last_updated": "2026-04-21",
+      "summary": "Clarify operator-facing refresh actions and official-disclosure-only messaging in the financial-report flow.",
+      "current_state": "The frontend now distinguishes cached reads from refresh actions and clarifies that the report-URL helper is limited to official disclosure links.",
+      "next_action": "Keep the copy and control split stable unless a new report-loading scope change is explicitly approved.",
+      "depends_on": [
+        "REPORT_005"
+      ],
+      "source_refs": {
+        "specs": [
+          "/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability"
+        ],
+        "plans": [
+          "/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md"
+        ],
+        "decisions": [
+          "/Users/brenda/Projects/investment_assistant/docs/decisions/2026-04-11-version-b-cache-and-artifacts.md"
+        ],
+        "handoff": [
+          "/Users/brenda/Projects/investment_assistant/docs/handoff.md"
+        ],
+        "code_areas": [
+          "/Users/brenda/Projects/investment_assistant/app/static/js/report.js",
+          "/Users/brenda/Projects/investment_assistant/app/templates/index.html"
+        ],
+        "tests": [
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_frontend.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py"
+        ]
+      },
+      "acceptance_checks": [
+        "The UI clearly separates cached read actions from refresh actions.",
+        "Official-disclosure-only limitations are visible in the report URL helper copy.",
+        "The frontend wiring for refresh behavior stays coherent with cache-first backend behavior."
+      ],
+      "verification_evidence": {
+        "automated": [
+          "Version B focused regression modules passed: 85 passed.",
+          "Full repository suite passed: 187 passed."
+        ],
+        "manual": [],
+        "notes": "docs/handoff.md explicitly calls out the refresh-control and copy updates as completed Version B work."
+      }
+    }
+  ]
+}
