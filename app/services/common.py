@@ -145,9 +145,15 @@ def to_date_str(value: Any) -> str | None:
     if not text:
         return None
 
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d", "%Y-%m", "%Y/%m"):
+    for fmt, text_length in (
+        ("%Y-%m-%d", 10),
+        ("%Y/%m/%d", 10),
+        ("%Y%m%d", 8),
+        ("%Y-%m", 7),
+        ("%Y/%m", 7),
+    ):
         try:
-            parsed = dt.datetime.strptime(text[: len(fmt)], fmt)
+            parsed = dt.datetime.strptime(text[:text_length], fmt)
             if fmt in {"%Y-%m", "%Y/%m"}:
                 parsed = parsed.replace(day=1)
             return parsed.date().isoformat()

@@ -1115,13 +1115,13 @@
       "title": "Smoke verification for cache-first and refresh flows",
       "category": "quality",
       "priority": "P0",
-      "status": "not_started",
-      "passes": false,
+      "status": "completed",
+      "passes": true,
       "user_visible": false,
       "last_updated": "2026-04-21",
       "summary": "Run the recommended browser smoke path for cache-first and explicit-refresh flows so operator behavior is confirmed end to end.",
-      "current_state": "The handoff explicitly recommends this work, but the browser smoke pass has not yet been captured as a completed artifact in the planning inventory.",
-      "next_action": "Execute the recommended browser smoke path from docs/handoff.md and attach the result here.",
+      "current_state": "The documented 000333 smoke path has now been completed in the browser against an isolated app instance on 127.0.0.1:8010, with fresh UI evidence for cache-first reads, explicit refresh warnings, annual-report auto-read, and post-restart report Q&A continuity.",
+      "next_action": "Use this captured smoke result as the current operator-confidence baseline, and revisit only if cache or refresh behavior changes again.",
       "depends_on": [
         "MARKET_003",
         "REPORT_005",
@@ -1149,9 +1149,26 @@
         "A report question after app restart still works from the persisted artifact path."
       ],
       "verification_evidence": {
-        "automated": [],
-        "manual": [],
-        "notes": "This is an explicitly recommended next step from docs/handoff.md rather than already completed work."
+        "automated": [
+          "git status --short and git diff --stat both returned empty output before the smoke attempt.",
+          "curl -sS http://127.0.0.1:8010/healthz returned {\"status\":\"ok\"} for the isolated smoke instance.",
+          "POST /api/analyze with {\"stock_code\":\"000333\",\"refresh\":false} returned 200 with 2995 price rows and 5 financial rows; realtime quote fetch fell back to the historical latest close.",
+          "POST /api/analyze with {\"stock_code\":\"000333\",\"refresh\":true} returned 200 and warned that upstream price fetch failed, so cached data was returned for the refresh path.",
+          "GET /api/financial-report-analysis?symbol=000333&refresh=false returned 200 with 5 series rows and as_of=2025-09-30.",
+          "Two GET /api/financial-report-autoread?symbol=000333&force_refresh=false calls returned 200 with the same report_key for the 2025 annual report.",
+          "SQLite query against investment.db still showed the latest 000333 report_artifacts row at parsed_at=2026-04-17T06:35:40+00:00 after the browser smoke, which supports stored-artifact reuse instead of a fresh reparse.",
+          "After restarting the isolated app, POST /api/financial-report-qa for the same report_key returned 200 and the browser showed a fresh answer turn, which confirms persisted-artifact reload after process restart."
+        ],
+        "manual": [
+          "Google Chrome loaded http://127.0.0.1:8010/ with the title Investment Assistant Dashboard.",
+          "Browser click path completed: 000333 -> Run Analysis showed 'Loaded cached snapshot for 000333. Price rows: 2995, Financial rows: 5.'",
+          "Browser click path completed: 000333 -> Refresh Data showed 'Refreshed 000333...' with warnings 'Price data: cached fallback | Realtime quote: historical close used'.",
+          "Browser click path completed: 000333 -> Load Financial Report showed 'Loaded cached summary for 000333 美的集团. As of: 2025-09-30.' and left Ask the Report disabled by design.",
+          "Browser click path completed: 000333 -> Auto Read Annual Report showed 'Auto-read completed for 000333 美的集团. As of: 2025-12-31.', current mode 'report text extracted', and enabled Ask the Report.",
+          "A browser-side report question before restart returned an assistant answer with capital-intensity evidence.",
+          "After backend restart, another browser-side report question returned an assistant answer about cash-flow vs net-profit matching, with five evidence lines."
+        ],
+        "notes": "The browser automation blocker was resolved by enabling local browser developer automation settings. The full handoff smoke path now completes, although the explicit refresh step still surfaces upstream warning/fallback behavior rather than a perfectly clean upstream refresh."
       }
     },
     {

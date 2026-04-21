@@ -189,6 +189,64 @@ def test_analyze_single_symbol_uses_cache_without_network_when_refresh_false(mon
     assert payload["warnings"] == []
 
 
+def test_analyze_single_symbol_keeps_only_year_end_rows_for_stock_analysis(monkeypatch) -> None:
+    """Stock Analysis should only render year-end annual rows in the financial summary table."""
+    monkeypatch.setattr(
+        market_usecase,
+        "_fetch_cached_symbol_data",
+        lambda _symbol, refresh=False: {
+            "price_data": [{"trade_date": "2026-04-09", "close": 10.0}],
+            "financial_summary": [
+                {"report_year": 2025, "report_date": "2025-12-31", "revenue": 120.0, "net_profit": 12.0, "roe": 13.0, "debt_ratio": 39.0},
+                {"report_year": 2025, "report_date": "2025-09-30", "revenue": 90.0, "net_profit": 9.0, "roe": 10.0, "debt_ratio": 41.0},
+                {"report_year": 2024, "report_date": "2024-12-31", "revenue": 100.0, "net_profit": 10.0, "roe": 12.0, "debt_ratio": 40.0},
+                {"report_year": 2023, "report_date": "2023-09-30", "revenue": 80.0, "net_profit": 8.0, "roe": 11.0, "debt_ratio": 42.0},
+            ],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(market_usecase, "fetch_stock_names", lambda _symbols: {})
+    monkeypatch.setattr(market_usecase, "fetch_realtime_quotes", lambda _symbols: {})
+
+    payload = market_usecase.analyze_single_symbol("000333", refresh=False)
+
+    assert [row["report_date"] for row in payload["financial_summary"]] == ["2025-12-31", "2024-12-31"]
+    assert payload["warnings"] == []
+
+
+def test_fetch_cached_symbol_data_repairs_quarter_only_financial_cache(monkeypatch) -> None:
+    """Quarter-only cached financial rows should trigger one repair fetch even without explicit refresh."""
+    state = {
+        "rows": [
+            {"report_year": 2025, "report_date": "2025-09-30", "revenue": 350.0, "net_profit": 38.0, "roe": 17.0, "debt_ratio": 61.0}
+        ]
+    }
+    fetched_symbols: list[str] = []
+
+    monkeypatch.setattr(market_usecase, "fetch_stock_prices", lambda _symbol: [{"trade_date": "2026-04-09", "close": 10.0}])
+    monkeypatch.setattr(market_usecase, "fetch_financial_reports", lambda _symbol: list(state["rows"]))
+
+    def fake_fetch_financial_summary(symbol: str) -> list[dict]:
+        fetched_symbols.append(symbol)
+        return [
+            {"report_year": 2025, "report_date": "2025-12-31", "revenue": 500.0, "net_profit": 50.0, "roe": 20.0, "debt_ratio": 60.0}
+        ]
+
+    def fake_upsert_financial_reports(_symbol: str, rows: list[dict]) -> None:
+        state["rows"] = list(rows)
+
+    monkeypatch.setattr(market_usecase, "fetch_financial_summary", fake_fetch_financial_summary)
+    monkeypatch.setattr(market_usecase, "upsert_financial_reports", fake_upsert_financial_reports)
+
+    payload = market_usecase._fetch_cached_symbol_data("000333", refresh=False)
+
+    assert fetched_symbols == ["000333"]
+    assert payload["financial_summary"] == [
+        {"report_year": 2025, "report_date": "2025-12-31", "revenue": 500.0, "net_profit": 50.0, "roe": 20.0, "debt_ratio": 60.0}
+    ]
+    assert payload["warnings"] == []
+
+
 def test_analyze_multi_symbols_forwards_refresh_to_worker(monkeypatch) -> None:
     """Watchlist analysis should pass the explicit refresh flag down to each worker call."""
     submitted: list[tuple[str, bool]] = []

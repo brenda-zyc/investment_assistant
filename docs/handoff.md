@@ -90,7 +90,12 @@ Build a local A-share investment analysis app with:
 
 ## In-Progress Changes
 - No known partial code changes are intentionally left open for Version B.
-- Manual browser smoke-testing of the new explicit refresh flows is still recommended.
+- Browser smoke verification for the `000333` cache-first and explicit-refresh path completed on 2026-04-21:
+  - `Run Analysis` loaded the cached stock snapshot in the browser.
+  - `Refresh Data` completed in the browser with warning/fallback semantics still visible under upstream instability.
+  - `Load Financial Report` loaded the cached summary and correctly left report Q&A disabled on summary-only load.
+  - `Auto Read Annual Report` completed twice, and the latest `report_artifacts` row for `000333` still showed `parsed_at = 2026-04-17T06:35:40+00:00`, which supports stored-artifact reuse on the second run.
+  - After backend restart, `Ask the Report` still answered from the persisted artifact path in the browser.
 
 ## Open Risks
 
@@ -105,17 +110,14 @@ Build a local A-share investment analysis app with:
 ## Next Step
 
 Primary recommendation:
-- Manually smoke-test the new cache-first and explicit-refresh flows in the browser.
-
-Secondary recommendation:
 - If refresh-path latency is still too high, add DNS preflight and fast-fail logic in market and report fetch paths.
 
-Suggested smoke path:
-- `000333` -> `Run Analysis` -> verify cached stock snapshot loads quickly
-- `000333` -> `Refresh Data` -> verify explicit refresh still works
-- `000333` -> `Load Financial Report` -> verify cached summary loads
-- `000333` -> `Auto Read Annual Report` twice -> verify the second run reuses the stored artifact
-- restart the app -> ask one report question again -> verify Q&A still works from the persisted artifact
+Latest completed smoke path:
+- `000333` -> `Run Analysis`
+- `000333` -> `Refresh Data`
+- `000333` -> `Load Financial Report`
+- `000333` -> `Auto Read Annual Report` twice
+- restart the app -> ask one report question again
 
 Current design work:
 - Report Q&A design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-01-report-qa-design.md`.

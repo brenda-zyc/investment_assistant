@@ -59,3 +59,7 @@ def test_call_with_resilience_blocks_other_calls_during_no_proxy_retry(monkeypat
 
     assert retry_result["value"] == (None, "*", "*")
     assert observe_result["value"] == ("http://proxy.local:8080", None, None)
+
+
+def test_to_date_str_parses_compact_yyyymmdd_dates() -> None:
+    assert common.to_date_str("20251231") == "2025-12-31"

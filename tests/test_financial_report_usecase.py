@@ -592,6 +592,100 @@ def test_get_financial_report_analysis_uses_cache_without_upstream_when_refresh_
     assert payload["warnings"] == []
 
 
+def test_get_financial_report_analysis_prefers_year_end_rows_for_load_report(monkeypatch) -> None:
+    """Load Financial Report should use year-end report periods when both quarterly and annual rows exist."""
+    monkeypatch.setattr(
+        financial_report_usecase,
+        "fetch_financial_reports",
+        lambda symbol: [
+            {
+                "symbol": symbol,
+                "report_year": 2025,
+                "report_date": "2025-09-30",
+                "revenue": 90.0,
+                "net_profit": 9.0,
+                "roe": 10.0,
+                "debt_ratio": 41.0,
+            },
+            {
+                "symbol": symbol,
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 100.0,
+                "net_profit": 10.0,
+                "roe": 12.0,
+                "debt_ratio": 40.0,
+            },
+            {
+                "symbol": symbol,
+                "report_year": 2023,
+                "report_date": "2023-12-31",
+                "revenue": 80.0,
+                "net_profit": 8.0,
+                "roe": 11.0,
+                "debt_ratio": 42.0,
+            },
+        ],
+    )
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {"000333": "美的集团"})
+
+    payload = financial_report_usecase.get_financial_report_analysis("000333", refresh=False)
+
+    assert payload["symbol"] == "000333"
+    assert payload["symbol_name"] == "美的集团"
+    assert payload["latest_report_year"] == 2024
+    assert payload["as_of"] == "2024-12-31"
+    assert [row["report_date"] for row in payload["series"]] == ["2024-12-31", "2023-12-31"]
+
+
+def test_get_financial_report_analysis_repairs_quarter_only_cached_rows(monkeypatch) -> None:
+    """Load Financial Report should repair pre-existing quarter-only cached rows before rendering summary."""
+    state = {
+        "rows": [
+            {
+                "symbol": "000333",
+                "report_year": 2025,
+                "report_date": "2025-09-30",
+                "revenue": 90.0,
+                "net_profit": 9.0,
+                "roe": 10.0,
+                "debt_ratio": 41.0,
+            }
+        ]
+    }
+    fetched_symbols: list[str] = []
+
+    monkeypatch.setattr(financial_report_usecase, "fetch_financial_reports", lambda _symbol: list(state["rows"]))
+    monkeypatch.setattr(financial_report_usecase, "fetch_stock_names", lambda _symbols: {"000333": "美的集团"})
+
+    def fake_fetch_financial_summary(symbol: str) -> list[dict]:
+        fetched_symbols.append(symbol)
+        return [
+            {
+                "symbol": symbol,
+                "report_year": 2025,
+                "report_date": "2025-12-31",
+                "revenue": 100.0,
+                "net_profit": 10.0,
+                "roe": 12.0,
+                "debt_ratio": 40.0,
+            }
+        ]
+
+    def fake_upsert_financial_reports(_symbol: str, rows: list[dict]) -> None:
+        state["rows"] = list(rows)
+
+    monkeypatch.setattr(financial_report_usecase, "fetch_financial_summary", fake_fetch_financial_summary)
+    monkeypatch.setattr(financial_report_usecase, "upsert_financial_reports", fake_upsert_financial_reports)
+
+    payload = financial_report_usecase.get_financial_report_analysis("000333", refresh=False)
+
+    assert fetched_symbols == ["000333"]
+    assert payload["latest_report_year"] == 2025
+    assert payload["as_of"] == "2025-12-31"
+    assert [row["report_date"] for row in payload["series"]] == ["2025-12-31"]
+
+
 def test_financial_report_autoread_reuses_latest_artifact_when_force_refresh_false(monkeypatch) -> None:
     """Auto-read should reuse the latest persisted artifact unless force refresh is requested."""
     report_qa_service.clear_report_context_cache()

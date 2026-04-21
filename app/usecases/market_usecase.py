@@ -27,6 +27,16 @@ WATCHLIST_MAX_SYMBOLS = 20
 WATCHLIST_MAX_WORKERS = 4
 
 
+def _has_year_end_financial_rows(rows: list[dict]) -> bool:
+    """Return whether cached financial rows include at least one year-end report period."""
+    return any(str((row or {}).get("report_date") or "").endswith("-12-31") for row in rows)
+
+
+def _select_stock_analysis_financial_rows(rows: list[dict]) -> list[dict]:
+    """Return year-end annual rows only so the Stock Analysis table stays period-consistent."""
+    return [row for row in rows if str((row or {}).get("report_date") or "").endswith("-12-31")]
+
+
 def _deduplicate_codes(raw_codes: list[str]) -> list[str]:
     """Return codes in first-seen order without duplicates."""
     unique_codes: list[str] = []
@@ -117,7 +127,7 @@ def _fetch_cached_symbol_data(symbol: str, *, refresh: bool = False) -> dict:
                 )
                 stored_prices = []
 
-    if refresh or not stored_financials:
+    if refresh or not stored_financials or not _has_year_end_financial_rows(stored_financials):
         try:
             financial_rows = fetch_financial_summary(symbol)
             upsert_financial_reports(symbol, financial_rows)
@@ -159,6 +169,7 @@ def _build_watchlist_snapshot(symbol: str, *, refresh: bool = False) -> dict:
 def analyze_single_symbol(symbol: str, *, refresh: bool = False) -> dict:
     """Fetch and persist single-symbol data with cache fallback warnings."""
     analyzed = _fetch_cached_symbol_data(symbol, refresh=refresh)
+    display_financial_rows = _select_stock_analysis_financial_rows(analyzed["financial_summary"])
 
     symbol_name: str | None = None
     try:
@@ -181,7 +192,7 @@ def analyze_single_symbol(symbol: str, *, refresh: bool = False) -> dict:
         "symbol_name": symbol_name,
         "realtime": realtime_quote if realtime_quote else None,
         "price_data": analyzed["price_data"],
-        "financial_summary": analyzed["financial_summary"],
+        "financial_summary": display_financial_rows,
         "warnings": analyzed["warnings"],
     }
 

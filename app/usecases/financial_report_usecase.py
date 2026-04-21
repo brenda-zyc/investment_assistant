@@ -41,6 +41,22 @@ _SNAPSHOT_DISPLAY_UNITS = {
 }
 
 
+def _report_date_is_year_end(report_date: Any) -> bool:
+    """Return whether one normalized report date represents a year-end annual period."""
+    return str(report_date or "").strip().endswith("-12-31")
+
+
+def _select_load_report_rows(financial_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefer year-end annual rows for the Load Financial Report summary path."""
+    year_end_rows = [row for row in financial_rows if _report_date_is_year_end(row.get("report_date"))]
+    return year_end_rows or financial_rows
+
+
+def _has_year_end_financial_rows(financial_rows: list[dict[str, Any]]) -> bool:
+    """Return whether cached financial rows already contain at least one year-end report period."""
+    return any(_report_date_is_year_end(row.get("report_date")) for row in financial_rows)
+
+
 def _latest_context_value(
     historical_context: dict[str, list[tuple[str, float]]] | None,
     key: str,
@@ -262,7 +278,7 @@ def get_financial_report_analysis(symbol: str, *, refresh: bool = False) -> dict
     """Return normalized annual financial reports and auto-generated analysis insights."""
     warnings: list[str] = []
     stored_financial_rows = fetch_financial_reports(symbol)
-    if refresh or not stored_financial_rows:
+    if refresh or not stored_financial_rows or not _has_year_end_financial_rows(stored_financial_rows):
         try:
             financial_rows = fetch_financial_summary(symbol)
             upsert_financial_reports(symbol, financial_rows)
@@ -282,7 +298,7 @@ def get_financial_report_analysis(symbol: str, *, refresh: bool = False) -> dict
     except Exception as exc:
         warnings.append(f"Stock name fetch failed. Reason: {exc}")
 
-    analysis_payload = compute_financial_report_analysis(stored_financial_rows)
+    analysis_payload = compute_financial_report_analysis(_select_load_report_rows(stored_financial_rows))
     analysis_payload["report_snapshot"] = _build_report_snapshot(
         metrics={
             "revenue": analysis_payload["metrics"].get("revenue"),

@@ -614,7 +614,7 @@ export function setupReportModule({
       const warningText = summarizeWarnings(data.warnings || []);
       reportStatusEl.textContent = `${
         refresh ? "Refreshed" : "Loaded cached summary for"
-      } ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
+      } ${displayName}. Report period end: ${data.as_of || "-"}.${warningText}`;
     } catch (err) {
       resetFinancialReportPanel();
       if (isBackendUnreachable(err)) {

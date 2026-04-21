@@ -54,3 +54,36 @@ def test_fetch_price_data_parses_and_filters_rows(monkeypatch) -> None:
     assert [row["trade_date"] for row in rows] == ["2024-01-02", "2024-01-03"]
     assert rows[0]["open"] == 9.0
     assert rows[1]["close"] == 11.0
+
+
+def test_extract_financial_rows_metric_style_keeps_year_end_dates_for_dedup() -> None:
+    sample_df = pd.DataFrame(
+        [
+            {"指标": "营业总收入", "20251231": 500.0, "20250930": 350.0, "20241231": 480.0, "20240930": 320.0},
+            {"指标": "归母净利润", "20251231": 50.0, "20250930": 38.0, "20241231": 48.0, "20240930": 32.0},
+            {"指标": "净资产收益率", "20251231": 20.0, "20250930": 17.0, "20241231": 19.0, "20240930": 18.0},
+            {"指标": "资产负债率", "20251231": 60.0, "20250930": 61.0, "20241231": 62.0, "20240930": 63.0},
+        ]
+    )
+
+    rows = market._extract_financial_rows_metric_style(sample_df)
+    deduped = market._deduplicate_by_year(rows, years=2)
+
+    assert deduped == [
+        {
+            "report_year": 2025,
+            "report_date": "2025-12-31",
+            "revenue": 500.0,
+            "net_profit": 50.0,
+            "roe": 20.0,
+            "debt_ratio": 60.0,
+        },
+        {
+            "report_year": 2024,
+            "report_date": "2024-12-31",
+            "revenue": 480.0,
+            "net_profit": 48.0,
+            "roe": 19.0,
+            "debt_ratio": 62.0,
+        },
+    ]

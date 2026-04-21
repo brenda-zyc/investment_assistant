@@ -101,6 +101,13 @@ def test_financial_report_template_includes_report_snapshot_panel_hooks() -> Non
     assert "function renderFinancialReportSnapshot(snapshot)" in _report_js_source()
 
 
+def test_stock_analysis_financial_summary_uses_annual_label() -> None:
+    source = _template_source()
+
+    assert "Financial Summary (Annual)" in source
+    assert "Financial Summary (5Y)" not in source
+
+
 def test_financial_report_template_includes_report_qa_panel() -> None:
     source = _template_source()
 
@@ -210,6 +217,14 @@ def test_report_flows_render_report_snapshot_sections() -> None:
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in report_body
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in url_body
     assert "renderFinancialReportSnapshot(data.report_snapshot || null);" in autoread_body
+
+
+def test_load_financial_report_status_uses_report_period_wording() -> None:
+    """Load Financial Report should label the summary date as a report-period end, not a generic as-of date."""
+    source = _report_js_source()
+    body = _function_body(source, "async function loadFinancialReport(refresh = false)")
+
+    assert "Report period end:" in body
 
 
 def test_report_snapshot_renderer_displays_origin_and_display_unit_metadata() -> None:
