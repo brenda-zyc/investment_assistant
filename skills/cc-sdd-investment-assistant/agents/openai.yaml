@@ -1,0 +1,4 @@
+interface:
+  display_name: "CC SDD Investment Assistant"
+  short_description: "Run cc-sdd style specs in this repo"
+  default_prompt: "Use $cc-sdd-investment-assistant to drive a spec-driven change in this investment assistant project."

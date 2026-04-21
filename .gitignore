@@ -12,4 +12,5 @@ __pycache__/
 htmlcov/
 
 investment.db
+investment_assistant.db
 127.0.0.1
