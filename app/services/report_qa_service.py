@@ -8,7 +8,7 @@ from typing import Any
 
 from app.db import fetch_report_artifact
 from app.services.llm_service import answer_report_question_with_llm
-from app.services import report_context_service
+from app.services import llm_service, report_context_service
 
 
 REPORT_CONTEXT_CACHE_MAX_ENTRIES = 8
@@ -100,6 +100,8 @@ GENERIC_FOLLOW_UP_PREFIXES = (
     "然后呢",
 )
 OUT_OF_SCOPE_KEYWORDS = (
+    "估值",
+    "贵不贵",
     "买入",
     "卖出",
     "目标价",
@@ -130,6 +132,8 @@ OUT_OF_SCOPE_KEYWORDS = (
     "市净率",
     "pe",
     "pb",
+    "行业景气度",
+    "景气度",
     "天气",
     "电影",
     "足球",
@@ -215,6 +219,10 @@ def _normalize_history_turn(item: dict[str, Any]) -> dict[str, Any] | None:
     if cleaned_citations:
         normalized_turn["citations"] = cleaned_citations
 
+    assistant_mode = str(item.get("mode") or "").strip().lower()
+    if assistant_mode:
+        normalized_turn["mode"] = assistant_mode
+
     return normalized_turn
 
 
@@ -234,6 +242,8 @@ def _is_follow_up_without_explicit_topic(question: str) -> bool:
     normalized_question = _normalize_scope_text(question)
     if not normalized_question:
         return False
+    if _contains_any(normalized_question, OUT_OF_SCOPE_KEYWORDS):
+        return False
     if _contains_any(normalized_question, REPORT_SCOPE_KEYWORDS):
         return False
     if any(normalized_question.startswith(prefix) for prefix in GENERIC_FOLLOW_UP_PREFIXES):
@@ -241,10 +251,27 @@ def _is_follow_up_without_explicit_topic(question: str) -> bool:
     return _contains_any(normalized_question, REPORT_FOLLOW_UP_KEYWORDS)
 
 
+def _assistant_mode_for_user_turn(history: list[dict[str, Any]], user_index: int) -> str:
+    """Return the assistant mode paired with one prior user turn when present."""
+    next_index = user_index + 1
+    if next_index >= len(history):
+        return ""
+
+    next_turn = history[next_index]
+    if str(next_turn.get("role") or "").strip().lower() != "assistant":
+        return ""
+
+    return str(next_turn.get("mode") or "").strip().lower()
+
+
 def _extract_follow_up_anchor(history: list[dict[str, Any]], session_summary: str) -> str:
     """Pick the most recent substantive user topic to anchor a weak follow-up question."""
-    for turn in reversed(history or []):
+    normalized_history = history or []
+    for idx in range(len(normalized_history) - 1, -1, -1):
+        turn = normalized_history[idx]
         if turn.get("role") != "user":
+            continue
+        if _assistant_mode_for_user_turn(normalized_history, idx) == "out_of_report_llm":
             continue
         content = str(turn.get("content") or "").strip()
         if not content:
@@ -673,6 +700,7 @@ def _normalize_support_text(text: str) -> str:
 def _support_text_fingerprint(text: str) -> str:
     """Build a compact fingerprint for de-duplicating support snippets."""
     normalized = _normalize_support_text(text).lower()
+    normalized = re.sub(r"(亿元|万元|元)", "", normalized)
     return re.sub(r"[\s,，。；;:：!?！？\"'“”‘’·\\-—()（）\\[\\]{}]+", "", normalized)
 
 
@@ -974,6 +1002,34 @@ def build_rule_fallback_answer(question: str, context: dict[str, Any]) -> dict[s
     return build_rule_fallback_answer_with_scope(question, context, allow_cached_answer=True)
 
 
+def answer_general_question_with_llm(
+    *,
+    question: str,
+    history: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a general LLM answer for out-of-report turns without report-grounded semantics."""
+    response = llm_service.answer_general_question(question=question, history=history)
+    if not isinstance(response, dict):
+        return None
+
+    short_answer = str(
+        response.get("short_answer")
+        or response.get("answer")
+        or response.get("summary")
+        or ""
+    ).strip()
+    if not short_answer:
+        return None
+
+    return {
+        "mode": "out_of_report_llm",
+        "short_answer": short_answer,
+        "evidence": [],
+        "citations": [],
+        "confidence": str(response.get("confidence") or "low").strip() or "low",
+    }
+
+
 def build_rule_fallback_answer_with_scope(
     question: str,
     context: dict[str, Any],
@@ -1065,8 +1121,29 @@ def answer_report_question(
 
     is_report_scoped = _is_report_scoped_question(llm_question, context, bounded_history, updated_summary)
     if not is_report_scoped:
+        preserved_summary = str(session_summary or "").strip()
+        if use_llm:
+            try:
+                general_answer = answer_general_question_with_llm(
+                    question=question_text,
+                    history=bounded_history,
+                )
+                if general_answer is not None:
+                    general_answer["updated_session_summary"] = preserved_summary
+                    general_answer["session_reset"] = False
+                    general_answer["report_key"] = report_key
+                    return general_answer
+            except Exception:
+                logger.warning(
+                    "report_qa out_of_report_llm_failed symbol=%s report_key=%s question=%s",
+                    symbol,
+                    report_key,
+                    question_text,
+                    exc_info=True,
+                )
+
         fallback = build_rule_fallback_answer_with_scope(llm_question, context, allow_cached_answer=False, history=bounded_history)
-        fallback["updated_session_summary"] = updated_summary
+        fallback["updated_session_summary"] = preserved_summary
         fallback["session_reset"] = False
         fallback["report_key"] = report_key
         return fallback

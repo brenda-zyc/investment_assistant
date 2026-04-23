@@ -87,6 +87,14 @@ Build a local A-share investment analysis app with:
     - `85 passed` on focused Version B regression modules
     - `187 passed` on the full repo suite
     - `python -m compileall app`
+- Completed report-Q&A dialogue regression and scope-tightening work:
+  - added dialogue-style regressions for rule-only, llm-hybrid, follow-up anchoring, and scope-boundary flows in `/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py`
+  - added a general-question LLM wrapper in `/Users/brenda/Projects/investment_assistant/app/services/llm_service.py`
+  - routed clearly out-of-report turns to `out_of_report_llm`
+  - kept out-of-report turns from becoming follow-up anchors for later report-scoped questions
+  - verification completed with:
+    - `37 passed` on `/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py`
+    - `34 passed` on `/Users/brenda/Projects/investment_assistant/tests/test_llm_service.py`, `/Users/brenda/Projects/investment_assistant/tests/test_financial_report_usecase.py`, and `/Users/brenda/Projects/investment_assistant/tests/test_financial_report_api.py`
 
 ## In-Progress Changes
 - No known partial code changes are intentionally left open for Version B.
@@ -103,7 +111,7 @@ Build a local A-share investment analysis app with:
 - Common failing domains include Eastmoney, SSE, and some Sina endpoints.
 - Cache-first defaults now improve latency for cached symbols, but cache misses and explicit refresh flows still depend on upstream stability.
 - `Warning` currently means partial upstream failure with degraded fallback, not complete failure.
-- Report-Q&A scope detection is still heuristic. It now rejects obvious market-data questions, but unusual phrasing may still need future tightening.
+- Report-Q&A scope detection now has explicit regression coverage for valuation and industry-cycle boundary cases, but unusual phrasing outside the covered dialogue scripts may still need future tightening.
 - `Load Financial Report` still leaves Q&A disabled by design because that path does not load report text.
 - LLM session config is still backend process-memory only. That is acceptable for the current single-user stage, but later batch execution will need a more explicit configuration boundary.
 
@@ -123,6 +131,8 @@ Current design work:
 - Report Q&A design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-01-report-qa-design.md`.
 - Matching cc-sdd spec scaffold added under `/Users/brenda/Projects/investment_assistant/.kiro/specs/report-qa/`.
 - Implementation plan saved at `/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-01-report-qa.md`.
+- Dialogue regression design written at `/Users/brenda/Projects/investment_assistant/docs/superpowers/specs/2026-04-17-report-qa-dialogue-regression-design.md`.
+- Dialogue regression implementation plan saved at `/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-17-report-qa-dialogue-regression.md`.
 - Version B mainflow stability spec lives under `/Users/brenda/Projects/investment_assistant/.kiro/specs/version-b-mainflow-stability/`.
 - Version B implementation plan lives at `/Users/brenda/Projects/investment_assistant/docs/superpowers/plans/2026-04-11-version-b-mainflow-stability.md`.
 - Report Q&A now uses SQLite-backed report artifacts as the authoritative fallback; chat transcript remains frontend-only.
@@ -138,6 +148,8 @@ Current implementation note:
 - `Analyze Report URL` now accepts `force_refresh` and reuses a matching stored artifact when present.
 - `Load Financial Report`, single-stock analysis, and watchlist analysis now default to cache-first reads and expose explicit refresh controls.
 - `Auto Read Annual Report` still returns source mode and optional LLM interpretation.
+- `Ask the Report` now has dialogue regressions for rule-only, llm-hybrid, anchored follow-up, and scope-boundary turns.
+- Clearly out-of-report questions now use `out_of_report_llm` and do not overwrite report follow-up memory.
 - LLM enhancement requires:
   - local browser config
   - explicit `Save for this session`

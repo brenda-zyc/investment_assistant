@@ -1,7 +1,7 @@
 {
   "project": "investment_assistant",
   "version": "1.0",
-  "last_updated": "2026-04-21",
+  "last_updated": "2026-04-23",
   "description": "Local-first A-share investment research assistant with market analysis, macro indicators, industry cycle tracking, financial report reading, and report Q&A.",
   "design_principles": [
     "Use structured repo artifacts instead of chat history as the long-running source of truth.",
@@ -979,13 +979,13 @@
       "title": "Dialogue regression coverage for report QA",
       "category": "quality",
       "priority": "P0",
-      "status": "in_progress",
-      "passes": false,
+      "status": "completed",
+      "passes": true,
       "user_visible": false,
-      "last_updated": "2026-04-21",
+      "last_updated": "2026-04-23",
       "summary": "Add dialogue-style regression coverage for report-QA turns so follow-ups and hybrid answers remain stable over time.",
-      "current_state": "A dedicated design and implementation plan exist, and recent report-QA dialogue work has started, but this record still needs a clean targeted verification pass and final state update.",
-      "next_action": "Run the targeted report-QA dialogue regressions and then decide whether this feature is completed or still in flight.",
+      "current_state": "Dialogue-style regressions now cover rule-only, llm_hybrid, anchored follow-up, and scope-boundary report-QA flows through a shared ask_and_append test helper in tests/test_report_qa_service.py.",
+      "next_action": "Keep these dialogue regressions green when report-QA answer modes, filtering, or follow-up heuristics change again.",
       "depends_on": [
         "REPORT_QA_001",
         "REPORT_QA_002"
@@ -1014,9 +1014,11 @@
         "Targeted report-QA regression runs pass with the new dialogue coverage enabled."
       ],
       "verification_evidence": {
-        "automated": [],
+        "automated": [
+          ".venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_report_qa_service.py -> 37 passed in 0.03s"
+        ],
         "manual": [],
-        "notes": "The planning inventory keeps this feature in_progress until the dialogue-regression verification is explicitly attached."
+        "notes": "The focused suite now includes dialogue regressions for rule-only, llm-hybrid, follow-up anchoring, and scope-boundary flows."
       }
     },
     {
@@ -1025,13 +1027,13 @@
       "title": "Out-of-report question routing and scope tightening",
       "category": "quality",
       "priority": "P0",
-      "status": "in_progress",
-      "passes": false,
+      "status": "completed",
+      "passes": true,
       "user_visible": true,
-      "last_updated": "2026-04-21",
+      "last_updated": "2026-04-23",
       "summary": "Tighten report-scope detection and support general out-of-report answers without polluting report-session memory.",
-      "current_state": "Scope-detection tightening and out-of-report routing are still being finalized alongside dialogue-regression work, so the product behavior is not yet treated as fully settled.",
-      "next_action": "Confirm final behavior and targeted tests before moving this record out of in_progress.",
+      "current_state": "Clearly out-of-report turns now route to out_of_report_llm, preserve the incoming report session summary, and no longer become the anchor for later report-scoped follow-ups.",
+      "next_action": "Preserve the current routing boundary and rerun the report-QA dialogue tests if scope keywords or general-LLM prompts change.",
       "depends_on": [
         "REPORT_QA_001",
         "REPORT_QA_002"
@@ -1054,7 +1056,8 @@
           "/Users/brenda/Projects/investment_assistant/app/services/llm_service.py"
         ],
         "tests": [
-          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py"
+          "/Users/brenda/Projects/investment_assistant/tests/test_report_qa_service.py",
+          "/Users/brenda/Projects/investment_assistant/tests/test_llm_service.py"
         ]
       },
       "acceptance_checks": [
@@ -1063,9 +1066,12 @@
         "Targeted tests cover the chosen routing boundary and preserve report-session continuity."
       ],
       "verification_evidence": {
-        "automated": [],
+        "automated": [
+          ".venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_report_qa_service.py -> 37 passed in 0.03s",
+          ".venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_llm_service.py tests/test_financial_report_usecase.py tests/test_financial_report_api.py -> 34 passed in 112.96s (0:01:52)"
+        ],
         "manual": [],
-        "notes": "This remains in_progress because the final product boundary still needs explicit verification."
+        "notes": "Verification covers clearly out-of-report routing, preserved report-session continuity, and the new general-question LLM wrapper."
       }
     },
     {

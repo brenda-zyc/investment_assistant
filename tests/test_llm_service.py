@@ -137,6 +137,45 @@ def test_answer_report_question_with_llm_uses_post_chat_completion_and_returns_p
     assert "\"citations\"" in prompt_text
 
 
+def test_answer_general_question_uses_post_chat_completion_and_returns_parsed_json(monkeypatch) -> None:
+    """The general-question helper should use a non-report-grounded prompt and return parsed JSON."""
+    captured: dict[str, object] = {}
+
+    def fake_get_effective_llm_config():
+        return {
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": "sk-test",
+        }
+
+    def fake_post_chat_completion(config, messages, *, timeout_seconds=20):
+        captured["config"] = config
+        captured["messages"] = messages
+        captured["timeout"] = timeout_seconds
+        return {
+            "short_answer": "general answer",
+            "confidence": "medium",
+        }
+
+    monkeypatch.setattr(llm_service, "get_effective_llm_config", fake_get_effective_llm_config)
+    monkeypatch.setattr(llm_service, "_post_chat_completion", fake_post_chat_completion)
+
+    result = llm_service.answer_general_question(
+        question="现在估值贵不贵？",
+        history=[{"role": "user", "content": "那现在估值贵不贵？"}],
+    )
+
+    assert result["short_answer"] == "general answer"
+    assert captured["config"]["model"] == "deepseek-chat"
+    assert captured["timeout"] == 20
+    assert captured["messages"][0]["role"] == "system"
+    assert "general financial assistant" in captured["messages"][0]["content"]
+    prompt_text = captured["messages"][1]["content"]
+    assert "outside the active annual-report scope" in prompt_text
+    assert "\"history\"" in prompt_text
+
+
 def test_post_chat_completion_logs_connection_failure(caplog, monkeypatch) -> None:
     """Transport failures should emit one warning log with enough metadata for diagnosis."""
     monkeypatch.setattr(llm_service, "_build_ssl_context", lambda: "ssl-context")

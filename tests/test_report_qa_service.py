@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import app.services.report_qa_service as report_qa_service
 
@@ -1269,3 +1270,347 @@ def test_answer_report_question_uses_boundary_fallback_for_unmatched_question() 
     assert "narrow the question" in payload["short_answer"].lower()
     assert payload["evidence"] == []
     assert payload["confidence"] == "low"
+
+
+def store_dialogue_context(report_key: str) -> None:
+    """Store one shared report-QA dialogue context for regression-style multi-turn tests."""
+    report_qa_service.clear_report_context_cache()
+    report_qa_service.store_report_context(
+        report_key,
+        {
+            "symbol": "600519",
+            "report": {"title": "贵州茅台2024年年度报告", "document_url": f"https://example.com/{report_key}.pdf"},
+            "report_text": (
+                "营业收入变动原因说明：主要是本期销量增加及茅台酒主要产品销售价格调整。 "
+                "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"
+            ),
+            "answers": [
+                {
+                    "question": "这家企业净利润是否为真？",
+                    "summary": "利润与现金流、扣非口径的偏离不大，利润质量整体较好。",
+                    "evidence": ["经营现金流/净利润 = 1.07x。", "扣非净利润/净利润 = 1.00x。"],
+                }
+            ],
+            "llm_analysis": None,
+            "extracted_metrics": {
+                "report_year": 2024,
+                "report_date": "2024-12-31",
+                "revenue": 170899152276.34,
+                "net_profit": 86228146421.62,
+                "deducted_net_profit": 86240905977.42,
+                "operating_cash_flow": 92463692168.43,
+            },
+        },
+    )
+
+
+def ask_and_append(
+    history: list[dict[str, object]],
+    question: str,
+    *,
+    session_summary: str,
+    symbol: str,
+    report_key: str,
+    use_llm: bool,
+) -> tuple[dict[str, Any], str]:
+    """Call report-QA once, append the turn pair, and carry the returned session summary forward."""
+    payload = report_qa_service.answer_report_question(
+        symbol=symbol,
+        report_key=report_key,
+        question=question,
+        history=cast(list[dict[str, Any]], history),
+        session_summary=session_summary,
+        use_llm=use_llm,
+    )
+    history.append({"role": "user", "content": question})
+    history.append(
+        {
+            "role": "assistant",
+            "content": str(payload["short_answer"]),
+            "evidence": list(payload.get("evidence", [])),
+            "citations": list(payload.get("citations", [])),
+            "mode": payload.get("mode"),
+        }
+    )
+    return payload, str(payload.get("updated_session_summary") or session_summary)
+
+
+def test_report_qa_rule_only_dialogue_flow() -> None:
+    """Dialogue regressions should protect the core rule-only report-QA flow across turns."""
+    store_dialogue_context("600519|rule-dialogue")
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "扣非净利润和净利润分别为多少？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么你认为净利润较为真实？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "今年利润增长主要来自哪里？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|rule-dialogue",
+        use_llm=False,
+    )
+
+    assert q1["mode"] == "rule_fallback"
+    assert "扣非净利润约862.41亿元" in q1["short_answer"]
+    assert "净利润约862.28亿元" in q1["short_answer"]
+    assert q2["mode"] == "rule_fallback"
+    assert "经营现金流" in q2["short_answer"]
+    assert "扣非净利润" in q2["short_answer"]
+    assert q3["mode"] == "rule_fallback"
+    assert "销量增加" in q3["short_answer"]
+    assert "价格调整" in q3["short_answer"]
+
+
+def test_report_qa_llm_hybrid_dialogue_flow(monkeypatch) -> None:
+    """Dialogue regressions should protect hybrid LLM answers, cleaning, and fallback transitions."""
+    store_dialogue_context("600519|hybrid-dialogue")
+
+    responses = iter(
+        [
+            {
+                "short_answer": "扣非净利润为862.41亿元，净利润为862.28亿元。",
+                "evidence": [
+                    "扣非净利润与净利润口径接近。",
+                    "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                    "归属于上市公司股东的扣除非经常性损益的净利润 86,240,905,977.42 74,752,564,425.52 15.37 62,792,896,829.57",
+                    "扣非净利润与净利润口径接近。",
+                ],
+                "citations": [
+                    {
+                        "source": "report_text",
+                        "snippet": "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                    },
+                    {
+                        "source": "report_text",
+                        "snippet": "归属于上市公司股东的扣除非经常性损益的净利润 86,240,905,977.42 74,752,564,425.52 15.37 62,792,896,829.57",
+                    },
+                    {
+                        "source": "report_text",
+                        "snippet": "归属于上市公司股东的净利润 86,228,146,421.62 74,734,071,550.75 15.38 62,717,467,870.12",
+                    },
+                ],
+                "confidence": "high",
+            },
+            {
+                "short_answer": "净利润较为真实，主要因为经营现金流与净利润匹配度高，且扣非净利润与净利润基本一致。",
+                "evidence": [
+                    "经营现金流/净利润 = 1.07x。",
+                    "扣非净利润/净利润 = 1.00x。",
+                ],
+                "citations": [
+                    {"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"},
+                    {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62元。"},
+                    {"source": "report_text", "snippet": "归属于上市公司股东的扣除非经常性损益的净利润86,240,905,977.42元。"},
+                ],
+                "confidence": "high",
+            },
+            {},
+        ]
+    )
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", lambda **_: next(responses))
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "扣非净利润和净利润分别为多少？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么你认为净利润较为真实？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "今年利润增长主要来自哪里？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|hybrid-dialogue",
+        use_llm=True,
+    )
+
+    assert q1["mode"] == "llm_hybrid"
+    assert q1["evidence"] == ["扣非净利润与净利润口径接近。"]
+    assert q1["citations"] == [
+        {"source": "report_text", "snippet": "归属于上市公司股东的净利润86,228,146,421.62。"},
+        {"source": "report_text", "snippet": "归属于上市公司股东的扣除非经常性损益的净利润86,240,905,977.42。"},
+    ]
+    assert q2["mode"] == "llm_hybrid"
+    assert "经营现金流" in q2["short_answer"]
+    assert "扣非净利润" in q2["short_answer"]
+    assert q2["citations"] == [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}]
+    assert q3["mode"] == "rule_fallback"
+    assert "销量增加" in q3["short_answer"]
+
+
+def test_report_qa_follow_up_dialogue_flow(monkeypatch) -> None:
+    """Dialogue regressions should keep weak follow-ups anchored to the last substantive report turn."""
+    store_dialogue_context("600519|follow-up-dialogue")
+
+    captured_questions: list[str] = []
+    responses = iter(
+        [
+            {
+                "short_answer": "因为经营现金流高于净利润，且扣非净利润与净利润几乎一致，所以利润质量较好。",
+                "evidence": ["经营现金流/净利润 = 1.07x。"],
+                "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}],
+                "confidence": "high",
+            },
+            {
+                "short_answer": "更具体地说，销售收现增加让现金流兑现优于利润确认，扣非口径也没有明显失真。",
+                "evidence": ["经营现金流较净利润高约6.24亿元。"],
+                "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额变动原因说明：主要是本期公司销售商品收到的现金增加。"}],
+                "confidence": "medium",
+            },
+        ]
+    )
+
+    def fake_llm(**kwargs):
+        captured_questions.append(str(kwargs["question"]))
+        return next(responses)
+
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_llm)
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "经营现金流和净利润匹配吗？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "为什么这么说？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=True,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "也没有展开呀",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        use_llm=True,
+    )
+
+    clarification = report_qa_service.answer_report_question(
+        symbol="600519",
+        report_key="600519|follow-up-dialogue",
+        question="展开一点",
+        history=[],
+        session_summary="",
+        use_llm=False,
+    )
+
+    assert q1["mode"] == "rule_fallback"
+    assert q2["mode"] == "llm_hybrid"
+    assert "上一轮关于“经营现金流和净利润匹配吗？”" in captured_questions[0]
+    assert q3["mode"] == "llm_hybrid"
+    assert "上一轮关于“经营现金流和净利润匹配吗？”" in captured_questions[1]
+    assert clarification["mode"] == "rule_fallback"
+    assert "please specify which part" in clarification["short_answer"].lower()
+
+
+def test_report_qa_scope_boundary_dialogue_flow(monkeypatch) -> None:
+    """Dialogue regressions should route clear out-of-report turns away from report-scoped memory."""
+    store_dialogue_context("600519|scope-dialogue")
+
+    out_of_scope_responses = iter(
+        [
+            {"short_answer": "估值是否偏贵要结合当前价格、增长预期和市场风险偏好综合判断。", "confidence": "medium"},
+            {"short_answer": "行业景气度需要看需求、价格和库存周期，不能只靠年报单点判断。", "confidence": "medium"},
+        ]
+    )
+    report_follow_up_questions: list[str] = []
+
+    def fake_general_llm(**kwargs):
+        _ = kwargs
+        return next(out_of_scope_responses)
+
+    def fake_report_llm(**kwargs):
+        report_follow_up_questions.append(str(kwargs["question"]))
+        return {
+            "short_answer": "之所以这样判断净利润，是因为经营现金流与净利润匹配度较高，且扣非口径与净利润基本一致。",
+            "evidence": ["经营现金流/净利润 = 1.07x。"],
+            "citations": [{"source": "report_text", "snippet": "经营活动产生的现金流量净额92,463,692,168.43元。"}],
+            "confidence": "high",
+        }
+
+    monkeypatch.setattr(report_qa_service.llm_service, "answer_general_question", fake_general_llm)
+    monkeypatch.setattr(report_qa_service, "answer_report_question_with_llm", fake_report_llm)
+
+    history: list[dict[str, object]] = []
+    session_summary = ""
+
+    q1, session_summary = ask_and_append(
+        history,
+        "净利润是否为真？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=False,
+    )
+    q2, session_summary = ask_and_append(
+        history,
+        "那现在估值贵不贵？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=True,
+    )
+    q3, session_summary = ask_and_append(
+        history,
+        "行业景气度怎么样？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=True,
+    )
+    q4, session_summary = ask_and_append(
+        history,
+        "为什么这么说？",
+        session_summary=session_summary,
+        symbol="600519",
+        report_key="600519|scope-dialogue",
+        use_llm=True,
+    )
+
+    assert q1["mode"] in {"rule_fallback", "llm_hybrid"}
+    assert q2["mode"] == "out_of_report_llm"
+    assert q3["mode"] == "out_of_report_llm"
+    assert q2["updated_session_summary"] == q1["updated_session_summary"]
+    assert q3["updated_session_summary"] == q1["updated_session_summary"]
+    assert q4["mode"] == "llm_hybrid"
+    assert "上一轮关于“净利润是否为真？”" in report_follow_up_questions[0]

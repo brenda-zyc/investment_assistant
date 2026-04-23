@@ -316,3 +316,38 @@ def answer_report_question_with_llm(
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
     )
+
+
+def answer_general_question(
+    *,
+    question: str,
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Answer one general financial question that sits outside the active report scope."""
+    effective = get_effective_llm_config()
+    if not effective:
+        raise ValueError("No LLM configuration is available")
+
+    prompt = {
+        "task": "Answer one general financial question outside the active annual-report scope.",
+        "question": question,
+        "history": history,
+        "output_schema": {
+            "short_answer": "string",
+            "confidence": "high | medium | low",
+        },
+        "constraints": [
+            "Do not claim the answer is grounded in the active annual report.",
+            "Do not return evidence or citation fields.",
+            "Do not give buy or sell advice.",
+            "Keep the answer concise and acknowledge uncertainty when context is incomplete.",
+            "Return JSON only.",
+        ],
+    }
+    return _post_chat_completion(
+        effective,
+        [
+            {"role": "system", "content": "You are a general financial assistant. Return JSON only."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+    )

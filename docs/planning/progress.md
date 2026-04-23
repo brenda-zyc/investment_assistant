@@ -72,3 +72,27 @@ This file records short session-level handoff notes for the current planning and
   - After restarting the isolated app, a second Ask the Report question returned a fresh browser-side assistant answer on cash-flow vs net-profit matching with five evidence lines, confirming persisted-artifact reload after process restart.
 - Next recommended step: Keep the current smoke evidence as the baseline for Version B. If refresh-path behavior changes later, rerun this same `000333` browser path before updating reliability claims.
 - Blockers: None for `RELIABILITY_002`; upstream refresh warnings remain an operational risk, not a smoke blocker.
+
+## 2026-04-23 REPORT_QA_003 REPORT_QA_004
+
+- Date: 2026-04-23
+- Feature ID: REPORT_QA_003, REPORT_QA_004
+- Status: Completed
+- What changed: Added dialogue-style report-QA regressions for rule-only, llm-hybrid, anchored follow-up, and scope-boundary flows; added a general-question LLM wrapper plus `out_of_report_llm` routing; tightened scope heuristics so clear valuation and industry-cycle turns stay out of report memory; and updated planning state to attach fresh verification evidence.
+- Files touched:
+  - `app/services/llm_service.py`
+  - `app/services/report_qa_service.py`
+  - `tests/test_llm_service.py`
+  - `tests/test_report_qa_service.py`
+  - `docs/planning/feature_list.json`
+  - `docs/planning/progress.md`
+  - `docs/handoff.md`
+- Verification:
+  - Baseline before edits: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_report_qa_service.py` -> `33 passed in 0.04s`
+  - Red phase: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_report_qa_service.py::test_report_qa_rule_only_dialogue_flow` -> failed with `NameError: ask_and_append is not defined`
+  - Red phase: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_llm_service.py::test_answer_general_question_uses_post_chat_completion_and_returns_parsed_json` -> failed with `AttributeError: module 'app.services.llm_service' has no attribute 'answer_general_question'`
+  - Dialogue/regression green check: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_llm_service.py::test_answer_general_question_uses_post_chat_completion_and_returns_parsed_json tests/test_report_qa_service.py::test_report_qa_rule_only_dialogue_flow tests/test_report_qa_service.py::test_report_qa_llm_hybrid_dialogue_flow tests/test_report_qa_service.py::test_report_qa_follow_up_dialogue_flow tests/test_report_qa_service.py::test_report_qa_scope_boundary_dialogue_flow` -> `5 passed in 0.03s`
+  - Focused suite: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_report_qa_service.py` -> `37 passed in 0.03s`
+  - Adjacent regressions: `.venv/bin/python -m pytest -p no:cov -q --override-ini addopts='' tests/test_llm_service.py tests/test_financial_report_usecase.py tests/test_financial_report_api.py` -> `34 passed in 112.96s (0:01:52)`
+- Next recommended step: If report-QA scope heuristics or general-LLM prompting change again, rerun the same focused suites before updating planning claims.
+- Blockers: None.
