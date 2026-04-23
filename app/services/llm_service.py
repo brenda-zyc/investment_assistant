@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import ssl
 import threading
@@ -16,6 +17,7 @@ except ImportError:  # pragma: no cover - fallback for environments where certif
 
 _SESSION_LOCK = threading.Lock()
 _SESSION_LLM_CONFIG: dict[str, str] = {}
+logger = logging.getLogger(__name__)
 
 
 def _normalize_llm_config(config: dict[str, Any]) -> dict[str, str]:
@@ -125,6 +127,13 @@ def _post_chat_completion(
 ) -> dict[str, Any]:
     """Send one OpenAI-compatible chat completion request and parse JSON response."""
     request_url = f"{config['base_url']}/chat/completions"
+    logger.info(
+        "llm_chat_completion start provider=%s model=%s timeout=%s message_count=%s",
+        config["provider"],
+        config["model"],
+        timeout_seconds,
+        len(messages),
+    )
     payload = {
         "model": config["model"],
         "temperature": 0.1,
@@ -146,8 +155,23 @@ def _post_chat_completion(
             raw = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
+        logger.warning(
+            "llm_chat_completion http_error provider=%s model=%s timeout=%s status=%s detail=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            exc.code,
+            detail[:300],
+        )
         raise RuntimeError(f"LLM HTTP error {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
+        logger.warning(
+            "llm_chat_completion connection_failed provider=%s model=%s timeout=%s reason=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            exc.reason,
+        )
         raise RuntimeError(f"LLM connection failed: {exc.reason}") from exc
 
     parsed = json.loads(raw)
@@ -157,8 +181,22 @@ def _post_chat_completion(
         .get("content")
     )
     if not content:
+        logger.warning(
+            "llm_chat_completion empty_content provider=%s model=%s timeout=%s response_keys=%s",
+            config["provider"],
+            config["model"],
+            timeout_seconds,
+            sorted(parsed.keys()),
+        )
         raise RuntimeError("LLM response did not contain message content")
-    return json.loads(content)
+    result = json.loads(content)
+    logger.info(
+        "llm_chat_completion success provider=%s model=%s response_keys=%s",
+        config["provider"],
+        config["model"],
+        sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
+    )
+    return result
 
 
 def test_llm_connection(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -226,6 +264,90 @@ def interpret_annual_report_text(
         effective,
         [
             {"role": "system", "content": "You are a financial report reading assistant. Return JSON only."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+    )
+
+
+def answer_report_question_with_llm(
+    *,
+    report_title: str | None,
+    report_text: str,
+    question: str,
+    history: list[dict[str, str]],
+    session_summary: str,
+    extracted_metrics: dict[str, Any],
+    answers: list[dict[str, Any]],
+    llm_analysis: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Answer one report-scoped question using the configured chat-completion provider."""
+    effective = get_effective_llm_config()
+    if not effective:
+        raise ValueError("No LLM configuration is available")
+
+    prompt = {
+        "task": "Answer one question about the currently active annual report only.",
+        "question": question,
+        "session_summary": session_summary,
+        "history": history,
+        "report_title": report_title,
+        "extracted_metrics": extracted_metrics,
+        "three_questions": answers,
+        "llm_reading_notes": llm_analysis,
+        "output_schema": {
+            "short_answer": "string",
+            "evidence": ["string"],
+            "citations": [{"source": "report_text", "snippet": "string"}],
+            "confidence": "high | medium | low",
+        },
+        "report_text": report_text[:16000],
+        "constraints": [
+            "Use only the provided annual-report context.",
+            "Do not give buy or sell advice.",
+            "If you mention any numeric value, ratio, percentage, amount, or year, include at least one citation snippet that directly supports it.",
+            "If the report text does not support a requested number, say the report does not clearly provide it instead of inferring.",
+            "Return JSON only.",
+        ],
+    }
+    return _post_chat_completion(
+        effective,
+        [
+            {"role": "system", "content": "You are a report-scoped financial Q&A assistant. Return JSON only."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+    )
+
+
+def answer_general_question(
+    *,
+    question: str,
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Answer one general financial question that sits outside the active report scope."""
+    effective = get_effective_llm_config()
+    if not effective:
+        raise ValueError("No LLM configuration is available")
+
+    prompt = {
+        "task": "Answer one general financial question outside the active annual-report scope.",
+        "question": question,
+        "history": history,
+        "output_schema": {
+            "short_answer": "string",
+            "confidence": "high | medium | low",
+        },
+        "constraints": [
+            "Do not claim the answer is grounded in the active annual report.",
+            "Do not return evidence or citation fields.",
+            "Do not give buy or sell advice.",
+            "Keep the answer concise and acknowledge uncertainty when context is incomplete.",
+            "Return JSON only.",
+        ],
+    }
+    return _post_chat_completion(
+        effective,
+        [
+            {"role": "system", "content": "You are a general financial assistant. Return JSON only."},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
     )

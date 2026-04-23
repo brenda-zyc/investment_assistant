@@ -9,6 +9,10 @@ router = APIRouter()
 @router.get("/industry_cycles")
 def industry_cycles(
     refresh: bool = Query(default=True, description="Refresh from AkShare before reading SQLite cache"),
+    refresh_external: bool = Query(
+        default=False,
+        description="Refresh external reference data before reading SQLite cache",
+    ),
 ) -> dict:
     """Return industry cycle dashboard rows with current value and 1Y/5Y percentiles."""
-    return get_industry_cycles(refresh=refresh, diagnostics=True)
+    return get_industry_cycles(refresh=refresh, diagnostics=True, refresh_external=refresh_external)

@@ -287,6 +287,101 @@ def test_compute_financial_report_autoread_assessment_positive_case() -> None:
     assert answer_map["capital_intensity"]["verdict"] == "资本投入压力较低"
     assert payload["derived_metrics"]["cash_conversion"] == 1.2
     assert payload["derived_metrics"]["recurring_profit_ratio"] == 0.9
+    assert "最新经营现金流 = 12.00元（约0.00亿元）。" in answer_map["profit_sustainability"]["evidence"]
+
+
+def test_compute_financial_report_autoread_assessment_formats_large_currency_evidence_readably() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={},
+        historical_context={
+            "revenue": [("2024-12-31", 120_000_000_000.0)],
+            "net_profit": [("2024-12-31", 20_000_000_000.0)],
+            "roe": [("2024-12-31", 15.5)],
+            "deducted_net_profit": [("2024-12-31", 18_000_000_000.0)],
+            "operating_cash_flow": [("2024-12-31", 75_429_516_296.0)],
+            "capex_cash_outflow": [("2024-12-31", 9_300_000_000.0)],
+        },
+    )
+
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert "最新经营现金流 = 75,429,516,296.00元（约754.30亿元）。" in answer_map["profit_sustainability"]["evidence"]
+
+
+def test_compute_financial_report_autoread_assessment_falls_back_from_unverified_deducted_profit() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={
+            "report_date": "2025-12-31",
+            "net_profit": 51_800_000_000.0,
+            "deducted_net_profit": 9_881_295_308.0,
+            "operating_cash_flow": 75_400_000_000.0,
+            "evidence": [
+                {
+                    "metric": "net_profit",
+                    "raw_number": "518亿",
+                    "snippet": "归属于上市公司股东的净利润518亿。",
+                },
+                {
+                    "metric": "deducted_net_profit",
+                    "raw_number": "9,881,295,308",
+                    "snippet": "归属于上市公司股东的扣除非经常性损益后的净利润 9,881,295,308 11,742,681,798 12,502,666,197 16,596,871,437 经营活动产生的现金流量净额",
+                },
+                {
+                    "metric": "operating_cash_flow",
+                    "raw_number": "754亿",
+                    "snippet": "经营活动产生的现金流量净额754亿。",
+                },
+            ],
+        },
+        historical_context={
+            "net_profit": [("2025-09-30", 37_863_620_974.0)],
+            "deducted_net_profit": [("2025-12-31", 50_723_514_740.0)],
+            "operating_cash_flow": [("2025-12-31", 75_429_516_296.0)],
+        },
+    )
+
+    assert round(payload["derived_metrics"]["recurring_profit_ratio"], 4) == round(50_723_514_740.0 / 51_800_000_000.0, 4)
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert "扣非净利润抽取未验证，已回退到历史财务序列。" in answer_map["profit_authenticity"]["evidence"]
+
+
+def test_compute_financial_report_autoread_assessment_skips_yoy_when_report_period_mismatches_history() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={
+            "report_date": "2025-12-31",
+            "revenue": 349_079_082_852.0,
+            "net_profit": 51_800_000_000.0,
+        },
+        historical_context={
+            "revenue": [("2024-09-30", 230_396_480_019.0), ("2025-09-30", 254_199_543_240.0)],
+            "net_profit": [("2024-09-30", 24_357_458_921.0), ("2025-09-30", 37_863_620_974.0)],
+            "roe": [("2025-09-30", 25.45)],
+        },
+    )
+
+    assert payload["derived_metrics"]["revenue_yoy"] is None
+    assert payload["derived_metrics"]["net_profit_yoy"] is None
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert not any(item.startswith("最新收入同比") for item in answer_map["profit_sustainability"]["evidence"])
+    assert not any(item.startswith("最新净利润同比") for item in answer_map["profit_sustainability"]["evidence"])
+
+
+def test_compute_financial_report_autoread_assessment_penalizes_low_quality_profit_signals() -> None:
+    payload = compute_financial_report_autoread_assessment(
+        latest_report_metrics={},
+        historical_context={
+            "revenue": [("2021-12-31", 100.0), ("2022-12-31", 110.0), ("2023-12-31", 121.0), ("2024-12-31", 133.1), ("2025-12-31", 146.41)],
+            "net_profit": [("2021-12-31", 10.0), ("2022-12-31", 12.0), ("2023-12-31", 14.4), ("2024-12-31", 17.28), ("2025-12-31", 20.736)],
+            "roe": [("2025-12-31", 22.0)],
+            "deducted_net_profit": [("2025-12-31", 4.0)],
+            "operating_cash_flow": [("2025-12-31", 6.0)],
+            "capex_cash_outflow": [("2025-12-31", 3.0)],
+        },
+    )
+
+    answer_map = {item["id"]: item for item in payload["answers"]}
+    assert answer_map["profit_authenticity"]["level"] == "risk"
+    assert answer_map["profit_sustainability"]["level"] == "warn"
+    assert answer_map["profit_sustainability"]["verdict"] == "一般"
 
 
 def test_compute_financial_report_autoread_assessment_insufficient_case() -> None:

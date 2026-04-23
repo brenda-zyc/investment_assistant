@@ -509,6 +509,21 @@
         gap: 12px;
       }
 
+      .external-data-table a {
+        color: var(--primary);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .external-data-table a:hover {
+        text-decoration: underline;
+      }
+
+      .external-data-table .note {
+        color: var(--ink-soft);
+        white-space: normal;
+      }
+
       .report-summary-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -538,6 +553,81 @@
       .report-kpi .value {
         font-family: "Fira Code", monospace;
         font-size: 18px;
+        font-weight: 600;
+      }
+
+      .report-snapshot {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+
+      .report-snapshot-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .report-snapshot-head h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .report-snapshot-sections {
+        display: grid;
+        gap: 10px;
+      }
+
+      .report-snapshot-section {
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .report-snapshot-section h4 {
+        margin: 0 0 8px;
+        font-size: 13px;
+      }
+
+      .report-snapshot-items {
+        display: grid;
+        gap: 8px;
+      }
+
+      @media (min-width: 980px) {
+        .report-snapshot-items {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .report-snapshot-item {
+        border: 1px solid #e5edf7;
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 8px 10px;
+      }
+
+      .report-snapshot-item .meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .report-snapshot-item .name {
+        color: #475569;
+        font-size: 12px;
+      }
+
+      .report-snapshot-item .value {
+        font-family: "Fira Code", monospace;
+        font-size: 15px;
         font-weight: 600;
       }
 
@@ -600,6 +690,162 @@
 
       .report-answer-evidence li + li {
         margin-top: 4px;
+      }
+
+      .report-qa-section {
+        border: 1px solid #dfe7f2;
+        border-radius: 12px;
+        background: #f8fbff;
+        padding: 10px;
+        margin: 10px 0;
+      }
+
+      .report-qa-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .chip-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 8px 0 10px;
+      }
+
+      .chip-button {
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        background: #fff;
+        color: #334155;
+        font-family: "Fira Sans", "PingFang SC", sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 7px 12px;
+      }
+
+      .chip-button:hover:not(:disabled) {
+        background: #f8fbff;
+      }
+
+      .chip-button:disabled {
+        opacity: 0.55;
+      }
+
+      .report-qa-transcript {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .report-qa-empty {
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        background: #fff;
+        color: #64748b;
+        font-size: 13px;
+        padding: 10px;
+      }
+
+      .report-qa-turn {
+        border: 1px solid #dbe3ef;
+        border-radius: 10px;
+        background: #fff;
+        padding: 10px;
+      }
+
+      .report-qa-turn.user {
+        background: #f8fafc;
+      }
+
+      .report-qa-turn.assistant {
+        border-color: #bbf7d0;
+        background: #f0fdf4;
+      }
+
+      .report-qa-turn.system {
+        border-color: #fed7aa;
+        background: #fff7ed;
+      }
+
+      .report-qa-turn-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+      }
+
+      .report-qa-role {
+        color: #1e3a8a;
+        font-family: "Fira Code", monospace;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+
+      .report-qa-turn-body {
+        color: #334155;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .report-qa-turn-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .report-qa-turn-meta .status {
+        font-size: 11px;
+        padding: 2px 8px;
+      }
+
+      .report-qa-turn-evidence,
+      .report-qa-turn-citations {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      .report-qa-turn-evidence li + li,
+      .report-qa-turn-citations li + li {
+        margin-top: 4px;
+      }
+
+      .report-qa-older-toggle {
+        margin: 8px 0 2px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .report-qa-older-toggle:hover {
+        text-decoration: underline;
+      }
+
+      .report-qa-input-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 10px;
+      }
+
+      .report-qa-input-row input {
+        flex: 1;
+        min-width: 240px;
       }
 
       .report-meta-row {
@@ -677,6 +923,7 @@
               <div class="row">
                 <input id="stockCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Stock code" />
                 <button id="analyzeBtn">Run Analysis</button>
+                <button id="refreshSingleStockBtn" type="button">Refresh Data</button>
               </div>
               <div class="muted" id="singleStatus"></div>
               <div class="muted" id="realtimeStatus"></div>
@@ -734,7 +981,7 @@
                   aria-expanded="false"
                   aria-controls="financialAccordionBody"
                 >
-                  <span>Financial Summary (5Y)</span>
+                  <span>Financial Summary (Annual)</span>
                   <span class="chevron" aria-hidden="true">></span>
                 </button>
               </div>
@@ -796,6 +1043,7 @@
               <textarea id="watchlistCodes" placeholder="000333, 600519, 601318"></textarea>
               <div class="row">
                 <button id="analyzeWatchlistBtn">Analyze Watchlist</button>
+                <button id="refreshWatchlistBtn" type="button">Refresh Watchlist</button>
               </div>
               <div class="muted" id="watchlistStatus"></div>
               <div class="table-wrap watchlist-wrap">
@@ -818,6 +1066,7 @@
                 </table>
               </div>
             </div>
+
           </aside>
         </div>
       </section>
@@ -882,11 +1131,37 @@
                   <th>Industry</th>
                   <th>Indicator</th>
                   <th>Value</th>
+                  <th>Indicator As Of</th>
                   <th>1Y Percentile</th>
                   <th>5Y Percentile</th>
                   <th>Source</th>
+                  <th>Link</th>
                   <th>Status</th>
                   <th>Error</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 12px">
+          <h2>External Data References</h2>
+          <p>Show cached weekly snapshots for key commodity, FX, rate, and coal indicators, with source links and fallback notes.</p>
+          <div class="row" style="margin-bottom: 10px">
+            <button id="refreshExternalDataBtn">Refresh External Data</button>
+          </div>
+          <div class="muted" id="externalDataStatus"></div>
+          <div class="table-wrap">
+            <table id="externalDataTable" class="external-data-table">
+              <thead>
+                <tr>
+                  <th>Indicator</th>
+                  <th>Latest Value</th>
+                  <th>Indicator As Of</th>
+                  <th>Source</th>
+                  <th>Link</th>
+                  <th>Status</th>
+                  <th>Note</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -902,13 +1177,15 @@
           <div class="row">
             <input id="reportCode" type="text" maxlength="6" placeholder="e.g. 600519" aria-label="Financial report symbol" />
             <button id="loadReportBtn">Load Financial Report</button>
+            <button id="refreshReportBtn">Refresh Financial Report</button>
             <button id="autoReadReportBtn">Auto Read Annual Report</button>
+            <button id="forceReReadReportBtn">Force Re-read Annual Report</button>
           </div>
           <div class="row" style="margin-top: 8px">
             <input id="reportUrlInput" type="text" placeholder="https://... (财报网页链接)" aria-label="Financial report URL" />
             <button id="analyzeReportUrlBtn">Analyze Report URL</button>
           </div>
-          <div class="tiny-note">支持中文网页链接（HTTP/HTTPS）和 PDF 文本解析。扫描版 PDF 暂不支持 OCR。</div>
+          <div class="tiny-note">Official disclosure links only. 仅支持官方披露链接（HTTP/HTTPS）和 PDF 文本解析；扫描版 PDF 暂不支持 OCR。</div>
           <div class="report-settings-card">
             <h3>LLM Settings</h3>
             <div class="row">
@@ -952,12 +1229,41 @@
             </div>
           </div>
 
+          <section class="report-snapshot" aria-live="polite">
+            <div class="report-snapshot-head">
+              <h3>Report Snapshot</h3>
+              <div id="reportSnapshotMeta" class="tiny-note"></div>
+            </div>
+            <div id="reportSnapshotSections" class="report-snapshot-sections"></div>
+          </section>
+
           <h3>Auto Analysis</h3>
           <div id="reportInsightList" class="report-insight-list"></div>
           <h3>Three Questions</h3>
           <div id="reportAutoreadList" class="report-insight-list"></div>
           <h3>LLM Reading Notes</h3>
           <div id="reportLlmAnalysis" class="report-insight-list"></div>
+          <section id="reportQaSection" class="report-qa-section">
+            <div class="report-qa-head">
+              <div>
+                <h3>Ask the Report</h3>
+                <div class="tiny-note" id="reportQaSessionLabel">Load or auto-read an annual report before asking questions.</div>
+              </div>
+            </div>
+            <div id="reportQaChipList" class="chip-list" aria-label="Guided report questions"></div>
+            <button id="reportQaOlderToggle" class="report-qa-older-toggle" hidden type="button"></button>
+            <div id="reportQaTranscript" class="report-qa-transcript" aria-live="polite"></div>
+            <div class="report-qa-input-row">
+              <input
+                id="reportQaInput"
+                type="text"
+                placeholder="Ask about the active annual report..."
+                aria-label="Ask the report"
+                disabled
+              />
+              <button id="reportQaAskBtn" disabled>Ask</button>
+            </div>
+          </section>
           <h3>Extraction Evidence</h3>
           <div id="reportEvidenceList" class="report-insight-list"></div>
 
@@ -981,1241 +1287,6 @@
       </section>
     </div>
 
-    <script>
-      const apiBase =
-        window.location.protocol === "http:" || window.location.protocol === "https:"
-          ? window.location.origin
-          : "http://127.0.0.1:8000";
-
-      const tabStockBtn = document.getElementById("tabStockBtn");
-      const tabMacroBtn = document.getElementById("tabMacroBtn");
-      const tabIndustryBtn = document.getElementById("tabIndustryBtn");
-      const tabReportBtn = document.getElementById("tabReportBtn");
-      const stockPanel = document.getElementById("stockPanel");
-      const macroPanel = document.getElementById("macroPanel");
-      const industryPanel = document.getElementById("industryPanel");
-      const reportPanel = document.getElementById("reportPanel");
-
-      const analyzeBtn = document.getElementById("analyzeBtn");
-      const stockCodeInput = document.getElementById("stockCode");
-      const singleStatusEl = document.getElementById("singleStatus");
-      const realtimeStatusEl = document.getElementById("realtimeStatus");
-
-      const metricSymbol = document.getElementById("metricSymbol");
-      const metricClose = document.getElementById("metricClose");
-      const metricChange = document.getElementById("metricChange");
-      const metricQuality = document.getElementById("metricQuality");
-
-      const priceLimitSelect = document.getElementById("priceLimitSelect");
-      const priceTableBody = document.querySelector("#priceTable tbody");
-      const priceMetaEl = document.getElementById("priceMeta");
-      const financialTableBody = document.querySelector("#financialTable tbody");
-
-      const watchlistCodes = document.getElementById("watchlistCodes");
-      const analyzeWatchlistBtn = document.getElementById("analyzeWatchlistBtn");
-      const watchlistStatusEl = document.getElementById("watchlistStatus");
-      const watchlistTableBody = document.querySelector("#watchlistTable tbody");
-
-      const macroTableSelect = document.getElementById("macroTableSelect");
-      const macroLimitInput = document.getElementById("macroLimitInput");
-      const macroFillMissing = document.getElementById("macroFillMissing");
-      const loadMacroBtn = document.getElementById("loadMacroBtn");
-      const macroStatusEl = document.getElementById("macroStatus");
-      const macroHintEl = document.getElementById("macroHint");
-      const valuationPanelEl = document.getElementById("valuationPanel");
-      const macroSignalTableBody = document.querySelector("#macroSignalTable tbody");
-      const macroTableHead = document.querySelector("#macroTable thead");
-      const macroTableBody = document.querySelector("#macroTable tbody");
-      const stockMetricTableBody = document.querySelector("#stockMetricTable tbody");
-      const stockMetricStatusEl = document.getElementById("stockMetricStatus");
-      const loadIndustryBtn = document.getElementById("loadIndustryBtn");
-      const industryStatusEl = document.getElementById("industryStatus");
-      const industryTableBody = document.querySelector("#industryTable tbody");
-      const reportCodeInput = document.getElementById("reportCode");
-      const loadReportBtn = document.getElementById("loadReportBtn");
-      const autoReadReportBtn = document.getElementById("autoReadReportBtn");
-      const reportUrlInput = document.getElementById("reportUrlInput");
-      const analyzeReportUrlBtn = document.getElementById("analyzeReportUrlBtn");
-      const llmProviderInput = document.getElementById("llmProviderInput");
-      const llmBaseUrlInput = document.getElementById("llmBaseUrlInput");
-      const llmModelInput = document.getElementById("llmModelInput");
-      const llmApiKeyInput = document.getElementById("llmApiKeyInput");
-      const saveLlmSessionBtn = document.getElementById("saveLlmSessionBtn");
-      const testLlmConnectionBtn = document.getElementById("testLlmConnectionBtn");
-      const llmSessionStatusEl = document.getElementById("llmSessionStatus");
-      const reportStatusEl = document.getElementById("reportStatus");
-      const reportSourceMetaEl = document.getElementById("reportSourceMeta");
-      const reportCurrentModeEl = document.getElementById("reportCurrentMode");
-      const reportLlmStatusEl = document.getElementById("reportLlmStatus");
-      const reportMetricYearEl = document.getElementById("reportMetricYear");
-      const reportMetricScoreEl = document.getElementById("reportMetricScore");
-      const reportMetricRevenueYoyEl = document.getElementById("reportMetricRevenueYoy");
-      const reportMetricProfitYoyEl = document.getElementById("reportMetricProfitYoy");
-      const reportInsightListEl = document.getElementById("reportInsightList");
-      const reportAutoreadListEl = document.getElementById("reportAutoreadList");
-      const reportLlmAnalysisEl = document.getElementById("reportLlmAnalysis");
-      const reportEvidenceListEl = document.getElementById("reportEvidenceList");
-      const reportDetailTableBody = document.querySelector("#reportDetailTable tbody");
-
-      let currentPriceRows = [];
-      let currentFinancialRows = [];
-      let currentSymbol = null;
-      let currentSymbolName = null;
-      let watchlistSymbols = [];
-      let lastMacroRows = [];
-      let macroLoadedOnce = false;
-      let industryLoadedOnce = false;
-      let reportLoadedOnce = false;
-      const llmStorageKey = "investmentAssistantLlmConfigV1";
-      const macroTableLabelMap = {
-        macro_indicators: "Production Macro (macro_indicators)",
-        macro_indicators_step1: "Core Macro (5 indicators)",
-        macro_indicators_step2: "Full Macro (10 indicators)",
-      };
-      const valuationIndicatorConfig = [
-        { key: "shanghai_composite_pe", label: "Shanghai Composite PE" },
-        { key: "csi300_pe", label: "CSI 300 PE" },
-        { key: "chinext_pe", label: "ChiNext PE" },
-        { key: "star_market_pe", label: "STAR Market PE" },
-        { key: "hang_seng_pe", label: "Hang Seng Index PE" },
-        { key: "hang_seng_tech_pe", label: "Hang Seng Tech Index PE" },
-      ];
-
-      function switchTab(targetId) {
-        const isStock = targetId === "stockPanel";
-        const isMacro = targetId === "macroPanel";
-        const isIndustry = targetId === "industryPanel";
-        const isReport = targetId === "reportPanel";
-        tabStockBtn.classList.toggle("active", isStock);
-        tabMacroBtn.classList.toggle("active", isMacro);
-        tabIndustryBtn.classList.toggle("active", isIndustry);
-        tabReportBtn.classList.toggle("active", isReport);
-        tabStockBtn.setAttribute("aria-selected", String(isStock));
-        tabMacroBtn.setAttribute("aria-selected", String(isMacro));
-        tabIndustryBtn.setAttribute("aria-selected", String(isIndustry));
-        tabReportBtn.setAttribute("aria-selected", String(isReport));
-        stockPanel.classList.toggle("active", isStock);
-        macroPanel.classList.toggle("active", isMacro);
-        industryPanel.classList.toggle("active", isIndustry);
-        reportPanel.classList.toggle("active", isReport);
-
-        if (isMacro && !macroLoadedOnce) {
-          loadMacroIndicators();
-          macroLoadedOnce = true;
-        }
-        if (isIndustry && !industryLoadedOnce) {
-          loadIndustryCycles();
-          industryLoadedOnce = true;
-        }
-        if (isReport && !reportLoadedOnce) {
-          if (currentSymbol) {
-            reportCodeInput.value = currentSymbol;
-            loadFinancialReport();
-          }
-          reportLoadedOnce = true;
-        }
-      }
-
-      tabStockBtn.addEventListener("click", () => switchTab("stockPanel"));
-      tabMacroBtn.addEventListener("click", () => switchTab("macroPanel"));
-      tabIndustryBtn.addEventListener("click", () => switchTab("industryPanel"));
-      tabReportBtn.addEventListener("click", () => switchTab("reportPanel"));
-
-      function formatNumber(value, digits = 2) {
-        if (value === null || value === undefined || value === "") return "-";
-        const n = Number(value);
-        if (Number.isNaN(n)) return "-";
-        return n.toLocaleString(undefined, { maximumFractionDigits: digits });
-      }
-
-      function formatPercent(value, digits = 2) {
-        if (value === null || value === undefined || value === "") return "-";
-        const n = Number(value);
-        if (Number.isNaN(n)) return "-";
-        return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: digits })}%`;
-      }
-
-      function escapeHtmlAttribute(value) {
-        return String(value ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/"/g, "&quot;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
-
-      function escapeHtml(value) {
-        return String(value ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
-
-      function isBackendUnreachable(err) {
-        const message = String(err?.message || err || "").toLowerCase();
-        return (
-          err instanceof TypeError &&
-          (message.includes("failed to fetch") || message.includes("networkerror") || message.includes("load failed"))
-        );
-      }
-
-      async function parseJsonResponse(res, errorLabel = "Backend") {
-        const bodyText = await res.text();
-        try {
-          return bodyText ? JSON.parse(bodyText) : {};
-        } catch (_err) {
-          throw new Error(`${errorLabel} returned non-JSON response (HTTP ${res.status}).`);
-        }
-      }
-
-      function resetMetrics() {
-        metricSymbol.textContent = "-";
-        metricClose.textContent = "-";
-        metricChange.textContent = "-";
-        metricChange.className = "value";
-        metricQuality.textContent = "-";
-      }
-
-      function updateSingleRealtimeDisplay(quote) {
-        if (!quote) return;
-        const displaySymbol = quote.symbol || currentSymbol || "-";
-        const displayName = quote.name || currentSymbolName;
-        metricSymbol.textContent = displayName ? `${displaySymbol} ${displayName}` : displaySymbol;
-        if (quote.latest_price !== null && quote.latest_price !== undefined) {
-          metricClose.textContent = formatNumber(quote.latest_price);
-        }
-      }
-
-      function updateMetrics(symbol, priceRows, financialRows) {
-        metricSymbol.textContent = symbol || "-";
-
-        const latest = priceRows[0];
-        const prev = priceRows[1];
-        if (latest && latest.close !== null && latest.close !== undefined) {
-          metricClose.textContent = formatNumber(latest.close);
-        } else {
-          metricClose.textContent = "-";
-        }
-
-        if (latest && prev && latest.close != null && prev.close != null && Number(prev.close) !== 0) {
-          const delta = Number(latest.close) - Number(prev.close);
-          const pct = (delta / Number(prev.close)) * 100;
-          metricChange.textContent = `${delta >= 0 ? "+" : ""}${formatNumber(delta)} (${pct >= 0 ? "+" : ""}${formatNumber(pct)}%)`;
-          metricChange.className = `value ${delta >= 0 ? "num-up" : "num-down"}`;
-        } else {
-          metricChange.textContent = "-";
-          metricChange.className = "value";
-        }
-
-        const latestFinancial = financialRows[0];
-        if (latestFinancial) {
-          metricQuality.textContent = `ROE ${formatNumber(latestFinancial.roe)}% / Debt ${formatNumber(latestFinancial.debt_ratio)}%`;
-        } else {
-          metricQuality.textContent = "-";
-        }
-      }
-
-      function renderPriceRows(rows) {
-        const limit = priceLimitSelect.value;
-        const renderRows = limit === "all" ? rows : rows.slice(0, Number(limit));
-        priceTableBody.innerHTML = "";
-
-        renderRows.forEach((row, index) => {
-          const previous = renderRows[index + 1];
-          const upDownClass =
-            previous && row.close != null && previous.close != null
-              ? Number(row.close) >= Number(previous.close)
-                ? "num-up"
-                : "num-down"
-              : "";
-
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.trade_date ?? "-"}</td>
-            <td>${formatNumber(row.open)}</td>
-            <td class="${upDownClass}">${formatNumber(row.close)}</td>
-            <td>${formatNumber(row.high)}</td>
-            <td>${formatNumber(row.low)}</td>
-            <td>${formatNumber(row.volume)}</td>
-            <td>${formatNumber(row.amount)}</td>
-          `;
-          priceTableBody.appendChild(tr);
-        });
-
-        priceMetaEl.textContent = `Showing ${renderRows.length} / ${rows.length} rows.`;
-      }
-
-      function renderFinancialRows(rows) {
-        financialTableBody.innerHTML = "";
-        rows.forEach((row) => {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.report_year ?? "-"}</td>
-            <td>${row.report_date ?? "-"}</td>
-            <td>${formatNumber(row.revenue)}</td>
-            <td>${formatNumber(row.net_profit)}</td>
-            <td>${formatNumber(row.roe)}</td>
-            <td>${formatNumber(row.debt_ratio)}</td>
-          `;
-          financialTableBody.appendChild(tr);
-        });
-      }
-
-      function resetFinancialReportPanel() {
-        reportMetricYearEl.textContent = "-";
-        reportMetricScoreEl.textContent = "-";
-        reportMetricRevenueYoyEl.textContent = "-";
-        reportMetricProfitYoyEl.textContent = "-";
-        reportInsightListEl.innerHTML = "";
-        reportAutoreadListEl.innerHTML = "";
-        reportLlmAnalysisEl.innerHTML = "";
-        reportEvidenceListEl.innerHTML = "";
-        reportDetailTableBody.innerHTML = "";
-        reportSourceMetaEl.textContent = "";
-        renderReportCurrentMode(null);
-        renderReportLlmStatus({ llm_enabled: false, llm_used: false });
-      }
-
-      function renderFinancialReportSummary(payload) {
-        reportMetricYearEl.textContent = payload.latest_report_year ?? "-";
-        if (payload.score === null || payload.score === undefined) {
-          reportMetricScoreEl.textContent = "-";
-        } else {
-          reportMetricScoreEl.textContent = `${payload.score} / 100 (${payload.grade || "-"})`;
-        }
-        reportMetricRevenueYoyEl.textContent = formatPercent(payload.metrics?.revenue_yoy);
-        reportMetricProfitYoyEl.textContent = formatPercent(payload.metrics?.net_profit_yoy);
-      }
-
-      function renderFinancialReportHighlights(highlights) {
-        reportInsightListEl.innerHTML = "";
-        (highlights || []).forEach((item) => {
-          const level = item.level || "info";
-          const div = document.createElement("div");
-          div.className = `report-insight-item ${level}`;
-          div.innerHTML = `
-            <div class="title">${item.title || "-"}</div>
-            <div class="detail">${item.detail || "-"}</div>
-          `;
-          reportInsightListEl.appendChild(div);
-        });
-      }
-
-      function renderFinancialReportEvidence(evidence) {
-        reportEvidenceListEl.innerHTML = "";
-        (evidence || []).forEach((item) => {
-          const div = document.createElement("div");
-          div.className = "report-insight-item";
-          div.innerHTML = `
-            <div class="title">${item.metric || "-"}: ${item.raw_number || "-"}</div>
-            <div class="detail">keyword=${item.keyword || "-"} | ${item.snippet || "-"}</div>
-          `;
-          reportEvidenceListEl.appendChild(div);
-        });
-      }
-
-      function renderFinancialReportTable(rows) {
-        reportDetailTableBody.innerHTML = "";
-        (rows || []).forEach((row) => {
-          const revenue = Number(row.revenue);
-          const netProfit = Number(row.net_profit);
-          const netMargin =
-            Number.isFinite(revenue) && revenue !== 0 && Number.isFinite(netProfit)
-              ? netProfit / revenue
-              : null;
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.report_year ?? "-"}</td>
-            <td>${row.report_date ?? "-"}</td>
-            <td>${formatNumber(row.revenue)}</td>
-            <td>${formatNumber(row.net_profit)}</td>
-            <td>${formatPercent(netMargin)}</td>
-            <td>${formatNumber(row.roe)}</td>
-            <td>${formatNumber(row.debt_ratio)}</td>
-          `;
-          reportDetailTableBody.appendChild(tr);
-        });
-      }
-
-      function reportLevelBadge(level, verdict) {
-        if (level === "ok") {
-          return `<span class="status ok">${verdict}</span>`;
-        }
-        if (level === "warn") {
-          return `<span class="status warn">${verdict}</span>`;
-        }
-        if (level === "risk") {
-          return `<span class="status bad">${verdict}</span>`;
-        }
-        return `<span class="status">${verdict}</span>`;
-      }
-
-      function renderFinancialReportAutoreadAnswers(answers) {
-        reportAutoreadListEl.innerHTML = "";
-        (answers || []).forEach((item) => {
-          const div = document.createElement("div");
-          div.className = `report-insight-item ${item.level || "info"}`;
-          const evidenceItems = (item.evidence || []).map((line) => `<li>${line || "-"}</li>`).join("");
-          div.innerHTML = `
-            <div class="report-answer-title">
-              <div class="title">${item.question || "-"}</div>
-              ${reportLevelBadge(item.level || "info", item.verdict || "-")}
-            </div>
-            <div class="detail">${item.summary || "-"}</div>
-            ${evidenceItems ? `<ul class="report-answer-evidence">${evidenceItems}</ul>` : ""}
-          `;
-          reportAutoreadListEl.appendChild(div);
-        });
-      }
-
-      function renderReportCurrentMode(mode) {
-        const mapping = {
-          historical_fallback: { label: "Current mode: historical fallback", level: "warn" },
-          report_text_extracted: { label: "Current mode: report text extracted", level: "ok" },
-        };
-        const current = mapping[mode] || { label: "Current mode: -", level: "" };
-        reportCurrentModeEl.innerHTML = `<span class="status ${current.level}">${current.label}</span>`;
-      }
-
-      function renderReportLlmStatus(payload) {
-        if (payload?.llm_used) {
-          const modelText = payload.llm_model ? ` (${payload.llm_model})` : "";
-          reportLlmStatusEl.innerHTML = `<span class="status ok">LLM: enabled${modelText}</span>`;
-          return;
-        }
-        if (payload?.llm_enabled) {
-          reportLlmStatusEl.innerHTML = `<span class="status warn">LLM: configured, not used</span>`;
-          return;
-        }
-        reportLlmStatusEl.innerHTML = `<span class="status">LLM: off</span>`;
-      }
-
-      function renderReportLlmAnalysis(analysis) {
-        reportLlmAnalysisEl.innerHTML = "";
-        if (!analysis) return;
-
-        if (analysis.summary) {
-          const summaryEl = document.createElement("div");
-          summaryEl.className = "report-insight-item";
-          summaryEl.innerHTML = `
-            <div class="title">LLM Summary</div>
-            <div class="detail">${escapeHtml(analysis.summary)}</div>
-          `;
-          reportLlmAnalysisEl.appendChild(summaryEl);
-        }
-
-        (analysis.question_notes || []).forEach((item) => {
-          const evidenceItems = (item.evidence || [])
-            .map((line) => `<li>${escapeHtml(line || "-")}</li>`)
-            .join("");
-          const noteEl = document.createElement("div");
-          noteEl.className = "report-insight-item";
-          noteEl.innerHTML = `
-            <div class="title">${escapeHtml(item.question_id || "question_note")}</div>
-            <div class="detail">${escapeHtml(item.summary || "-")}</div>
-            ${evidenceItems ? `<ul class="report-answer-evidence">${evidenceItems}</ul>` : ""}
-          `;
-          reportLlmAnalysisEl.appendChild(noteEl);
-        });
-      }
-
-      function readLlmFormConfig() {
-        return {
-          provider: (llmProviderInput.value || "deepseek").trim(),
-          base_url: llmBaseUrlInput.value.trim(),
-          model: llmModelInput.value.trim(),
-          api_key: llmApiKeyInput.value.trim(),
-        };
-      }
-
-      function writeLlmFormConfig(config) {
-        const data = config || {};
-        llmProviderInput.value = data.provider || "deepseek";
-        llmBaseUrlInput.value = data.base_url || "https://api.deepseek.com/v1";
-        llmModelInput.value = data.model || "deepseek-chat";
-        llmApiKeyInput.value = data.api_key || "";
-      }
-
-      function persistLlmConfigToLocalStorage() {
-        localStorage.setItem(llmStorageKey, JSON.stringify(readLlmFormConfig()));
-      }
-
-      function hydrateLlmFormFromLocalStorage() {
-        try {
-          const raw = localStorage.getItem(llmStorageKey);
-          if (!raw) {
-            writeLlmFormConfig(null);
-            return;
-          }
-          writeLlmFormConfig(JSON.parse(raw));
-        } catch (_err) {
-          writeLlmFormConfig(null);
-        }
-      }
-
-      async function loadLlmSessionStatus() {
-        try {
-          const res = await fetch(`${apiBase}/api/llm/session-config`);
-          const data = await parseJsonResponse(res, "LLM session status endpoint");
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-          if (data.configured) {
-            llmSessionStatusEl.textContent = `Backend session ready: ${data.provider} / ${data.model} / ${data.api_key_masked}.`;
-          } else {
-            llmSessionStatusEl.textContent = "Backend session not configured yet.";
-          }
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            llmSessionStatusEl.textContent = `Error: ${err.message}`;
-          }
-        }
-      }
-
-      async function saveLlmSessionConfig() {
-        persistLlmConfigToLocalStorage();
-        saveLlmSessionBtn.disabled = true;
-        llmSessionStatusEl.textContent = "Saving LLM session config...";
-        try {
-          const res = await fetch(`${apiBase}/api/llm/session-config`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(readLlmFormConfig()),
-          });
-          const data = await parseJsonResponse(res, "LLM session config endpoint");
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-          llmSessionStatusEl.textContent = `Backend session ready: ${data.provider} / ${data.model} / ${data.api_key_masked}.`;
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            llmSessionStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          saveLlmSessionBtn.disabled = false;
-        }
-      }
-
-      async function testLlmConnection() {
-        persistLlmConfigToLocalStorage();
-        testLlmConnectionBtn.disabled = true;
-        llmSessionStatusEl.textContent = "Testing LLM connection...";
-        try {
-          const res = await fetch(`${apiBase}/api/llm/test-connection`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(readLlmFormConfig()),
-          });
-          const data = await parseJsonResponse(res, "LLM test connection endpoint");
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-          llmSessionStatusEl.textContent = `LLM connection OK: ${data.provider} / ${data.model}.`;
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            llmSessionStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            llmSessionStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          testLlmConnectionBtn.disabled = false;
-        }
-      }
-
-      function metricDisplayName(name) {
-        const mapping = {
-          pe_ttm: "PE (TTM)",
-          pb: "PB",
-          roe: "ROE",
-          roic: "ROIC",
-          revenue_cagr_5y: "Revenue CAGR (5Y)",
-        };
-        return mapping[name] || name;
-      }
-
-      function renderStockMetricRows(metrics) {
-        stockMetricTableBody.innerHTML = "";
-        metrics.forEach((item) => {
-          const percentileText = item.percentile == null ? "-" : `${item.percentile}%`;
-          const fillWidth = item.percentile == null ? 0 : item.percentile;
-          const hint =
-            item.data_insufficient || item.percentile == null
-              ? `<span class="tiny-note">data_insufficient (n=${item.sample_size ?? 0})</span>`
-              : "";
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${metricDisplayName(item.name)}</td>
-            <td>${formatNumber(item.value, 4)}</td>
-            <td class="pct-cell">
-              <div class="pct-wrap">
-                <span>${percentileText}</span>
-                <div class="pct-bar"><div class="pct-fill" style="width:${fillWidth}%"></div></div>
-              </div>
-              ${hint}
-            </td>
-          `;
-          stockMetricTableBody.appendChild(tr);
-        });
-      }
-
-      async function analyzeSingleStock() {
-        const code = stockCodeInput.value.trim();
-        if (!/^\d{6}$/.test(code)) {
-          singleStatusEl.textContent = "Please input a valid 6-digit stock code.";
-          return;
-        }
-
-        analyzeBtn.disabled = true;
-        singleStatusEl.textContent = "Analyzing and updating dashboard...";
-
-        try {
-          const [res, metricRes] = await Promise.all([
-            fetch(`${apiBase}/api/analyze`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ stock_code: code }),
-            }),
-            fetch(`${apiBase}/stock_metrics?symbol=${encodeURIComponent(code)}`),
-          ]);
-          const [data, metricData] = await Promise.all([
-            parseJsonResponse(res),
-            parseJsonResponse(metricRes, "Metrics endpoint"),
-          ]);
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-          if (!metricRes.ok) throw new Error(metricData.detail || "Metric request failed");
-
-          currentPriceRows = data.price_data || [];
-          currentFinancialRows = data.financial_summary || [];
-          currentSymbol = data.symbol || code;
-          currentSymbolName = data.symbol_name || data.realtime?.name || null;
-          reportCodeInput.value = currentSymbol;
-          renderPriceRows(currentPriceRows);
-          renderFinancialRows(currentFinancialRows);
-          renderStockMetricRows(metricData.metrics || []);
-          stockMetricStatusEl.textContent = metricData.as_of
-            ? `As of: ${metricData.as_of}.`
-            : "As of: -";
-          updateMetrics(data.symbol, currentPriceRows, currentFinancialRows);
-          if (data.realtime) {
-            updateSingleRealtimeDisplay(data.realtime);
-            if (data.realtime.updated_at) {
-              realtimeStatusEl.textContent = `Realtime as of ${data.realtime.updated_at}.`;
-            }
-          } else {
-            metricSymbol.textContent = currentSymbolName ? `${currentSymbol} ${currentSymbolName}` : currentSymbol;
-            realtimeStatusEl.textContent = "";
-          }
-
-          const warningText = (data.warnings || []).length
-            ? ` Warnings: ${(data.warnings || []).join(" | ")}`
-            : "";
-          singleStatusEl.textContent = `Loaded ${data.symbol}. Price rows: ${currentPriceRows.length}, Financial rows: ${currentFinancialRows.length}.${warningText}`;
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            singleStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            singleStatusEl.textContent = `Error: ${err.message}`;
-          }
-          currentPriceRows = [];
-          currentFinancialRows = [];
-          currentSymbol = null;
-          currentSymbolName = null;
-          priceTableBody.innerHTML = "";
-          financialTableBody.innerHTML = "";
-          stockMetricTableBody.innerHTML = "";
-          stockMetricStatusEl.textContent = "";
-          realtimeStatusEl.textContent = "";
-          priceMetaEl.textContent = "";
-          resetMetrics();
-        } finally {
-          analyzeBtn.disabled = false;
-        }
-      }
-
-      function parseWatchlistInput(text) {
-        const raw = text
-          .split(/[\n,，\s]+/g)
-          .map((x) => x.trim())
-          .filter(Boolean);
-
-        const uniq = [];
-        raw.forEach((code) => {
-          if (!uniq.includes(code)) uniq.push(code);
-        });
-        return uniq;
-      }
-
-      function classifyWarningMessage(message) {
-        const text = String(message || "");
-        const lower = text.toLowerCase();
-        if (lower.includes("price fetch failed") && lower.includes("returned cached data")) {
-          return "Price data: cached fallback";
-        }
-        if (lower.includes("price fetch failed") && lower.includes("no cache available")) {
-          return "Price data: unavailable";
-        }
-        if (lower.includes("financial fetch failed") && lower.includes("returned cached data")) {
-          return "Financial data: cached fallback";
-        }
-        if (lower.includes("financial fetch failed") && lower.includes("no cache available")) {
-          return "Financial data: unavailable";
-        }
-        if (lower.includes("stock name fetch failed")) {
-          return "Stock name: unavailable";
-        }
-        if (lower.includes("realtime quote fetch failed")) {
-          return "Realtime quote: historical close used";
-        }
-        return text;
-      }
-
-      function buildWatchlistStatusDetail(item) {
-        if (item.error) {
-          return `Error: ${item.error}`;
-        }
-        const warningDetails = [...new Set((item.warnings || []).map(classifyWarningMessage).filter(Boolean))];
-        return warningDetails.join("\n");
-      }
-
-      function watchlistStatusBadge(item) {
-        const detail = buildWatchlistStatusDetail(item);
-        const tooltip = escapeHtmlAttribute(detail);
-        if (item.error) {
-          return `<span class="status bad has-detail" title="${tooltip}" aria-label="${tooltip}" tabindex="0">Error</span>`;
-        }
-        if ((item.warnings || []).length) {
-          return `<span class="status warn has-detail" title="${tooltip}" aria-label="${tooltip}" tabindex="0">Warning</span>`;
-        }
-        return `<span class="status ok">OK</span>`;
-      }
-
-      function renderWatchlistRows(rows) {
-        watchlistTableBody.innerHTML = "";
-        watchlistSymbols = [];
-        rows.forEach((item) => {
-          const p = item.latest_price || {};
-          const f = item.latest_financial || {};
-          const nameText = item.symbol_name || item.realtime?.name || "-";
-          const closePercentileText =
-            item.close_percentile === null || item.close_percentile === undefined
-              ? "-"
-              : `${item.close_percentile}%`;
-          const tr = document.createElement("tr");
-          tr.setAttribute("data-symbol", item.symbol ?? "");
-          tr.innerHTML = `
-            <td>${item.symbol ?? "-"}</td>
-            <td class="watchlist-name">${nameText}</td>
-            <td class="watchlist-time">${p.trade_date ?? "-"}</td>
-            <td class="watchlist-close">${formatNumber(p.close)}</td>
-            <td>${closePercentileText}</td>
-            <td>${formatNumber(f.revenue)}</td>
-            <td>${formatNumber(f.net_profit)}</td>
-            <td>${formatNumber(f.roe)}</td>
-            <td>${formatNumber(f.debt_ratio)}</td>
-            <td>${watchlistStatusBadge(item)}</td>
-          `;
-          watchlistTableBody.appendChild(tr);
-          if (item.symbol && !item.error) {
-            watchlistSymbols.push(item.symbol);
-          }
-        });
-      }
-
-      function applyRealtimeToWatchlist(quotes) {
-        Object.entries(quotes || {}).forEach(([symbol, quote]) => {
-          const row = watchlistTableBody.querySelector(`tr[data-symbol="${symbol}"]`);
-          if (!row) return;
-          const closeCell = row.querySelector(".watchlist-close");
-          const timeCell = row.querySelector(".watchlist-time");
-          const nameCell = row.querySelector(".watchlist-name");
-          if (closeCell && quote.latest_price !== null && quote.latest_price !== undefined) {
-            closeCell.textContent = formatNumber(quote.latest_price);
-          }
-          if (timeCell && quote.updated_at) {
-            timeCell.textContent = String(quote.updated_at);
-          }
-          if (nameCell && quote.name) {
-            nameCell.textContent = quote.name;
-          }
-        });
-      }
-
-      async function refreshRealtimePrices() {
-        const symbolPool = [];
-        if (currentSymbol) symbolPool.push(currentSymbol);
-        watchlistSymbols.forEach((symbol) => {
-          if (!symbolPool.includes(symbol)) symbolPool.push(symbol);
-        });
-        if (!symbolPool.length) return;
-
-        try {
-          const url = `${apiBase}/api/realtime-prices?symbols=${encodeURIComponent(symbolPool.join(","))}`;
-          const res = await fetch(url);
-          const data = await parseJsonResponse(res);
-          if (!res.ok) return;
-          const quotes = data.quotes || {};
-          if (currentSymbol && quotes[currentSymbol]) {
-            updateSingleRealtimeDisplay(quotes[currentSymbol]);
-          }
-          applyRealtimeToWatchlist(quotes);
-          realtimeStatusEl.textContent = `Realtime refreshed at ${new Date().toLocaleTimeString()}.`;
-        } catch (err) {
-          // Silent fail: realtime feed should not block base analysis UX.
-        }
-      }
-
-      async function analyzeWatchlist() {
-        const codes = parseWatchlistInput(watchlistCodes.value);
-        if (!codes.length) {
-          watchlistStatusEl.textContent = "Please input at least one stock code.";
-          return;
-        }
-
-        analyzeWatchlistBtn.disabled = true;
-        watchlistStatusEl.textContent = `Analyzing ${codes.length} symbols...`;
-        watchlistTableBody.innerHTML = "";
-        watchlistSymbols = [];
-
-        try {
-          const res = await fetch(`${apiBase}/api/analyze-multi`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ stock_codes: codes }),
-          });
-          const data = await parseJsonResponse(res);
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-
-          const rows = data.results || [];
-          renderWatchlistRows(rows);
-          const okCount = rows.filter((x) => !x.error).length;
-          watchlistStatusEl.textContent = `Loaded watchlist. ${okCount}/${rows.length} symbols succeeded.`;
-        } catch (err) {
-          watchlistTableBody.innerHTML = "";
-          if (isBackendUnreachable(err)) {
-            watchlistStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            watchlistStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          analyzeWatchlistBtn.disabled = false;
-        }
-      }
-
-      async function loadFinancialReport() {
-        const code = reportCodeInput.value.trim();
-        if (!/^\d{6}$/.test(code)) {
-          reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
-          return;
-        }
-
-        loadReportBtn.disabled = true;
-        resetFinancialReportPanel();
-        reportStatusEl.textContent = "Loading financial reports...";
-
-        try {
-          const res = await fetch(`${apiBase}/api/financial-report-analysis?symbol=${encodeURIComponent(code)}`);
-          const data = await parseJsonResponse(res);
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-
-          renderFinancialReportSummary(data);
-          renderFinancialReportHighlights(data.highlights || []);
-          renderFinancialReportEvidence([]);
-          renderFinancialReportTable(data.series || []);
-          reportSourceMetaEl.textContent = "";
-
-          const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
-          reportStatusEl.textContent = `Loaded ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
-        } catch (err) {
-          resetFinancialReportPanel();
-          if (isBackendUnreachable(err)) {
-            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            reportStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          loadReportBtn.disabled = false;
-        }
-      }
-
-      async function loadFinancialReportFromUrl() {
-        const url = reportUrlInput.value.trim();
-        if (!/^https?:\/\//i.test(url)) {
-          reportStatusEl.textContent = "Please input a valid http(s) report URL.";
-          return;
-        }
-
-        analyzeReportUrlBtn.disabled = true;
-        resetFinancialReportPanel();
-        reportStatusEl.textContent = "Fetching and parsing report URL...";
-
-        try {
-          const res = await fetch(`${apiBase}/api/financial-report-url-analysis`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          const data = await parseJsonResponse(res);
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-
-          const analysis = data.analysis || {};
-          renderFinancialReportSummary(analysis);
-          renderFinancialReportHighlights(analysis.highlights || []);
-          renderFinancialReportEvidence(data.extracted?.evidence || []);
-          renderFinancialReportTable(analysis.series || []);
-
-          const sourceTitle = data.source_title ? `Title: ${data.source_title}. ` : "";
-          const pageText =
-            data.pdf_pages === null || data.pdf_pages === undefined ? "" : `PDF pages: ${data.pdf_pages}. `;
-          const tlsText = data.tls_insecure ? "TLS: insecure fallback enabled. " : "";
-          reportSourceMetaEl.textContent = `${sourceTitle}${pageText}${tlsText}Content-Type: ${data.content_type || "-"}.`;
-          renderReportCurrentMode(null);
-          renderReportLlmStatus({ llm_enabled: false, llm_used: false });
-          reportStatusEl.textContent = `URL parsed successfully. As of: ${analysis.as_of || "-"}.`;
-        } catch (err) {
-          resetFinancialReportPanel();
-          if (isBackendUnreachable(err)) {
-            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            reportStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          analyzeReportUrlBtn.disabled = false;
-        }
-      }
-
-      async function autoReadAnnualReport() {
-        const code = reportCodeInput.value.trim();
-        if (!/^\d{6}$/.test(code)) {
-          reportStatusEl.textContent = "Please input a valid 6-digit stock code.";
-          return;
-        }
-
-        autoReadReportBtn.disabled = true;
-        resetFinancialReportPanel();
-        reportStatusEl.textContent = "Locating and reading the latest annual report...";
-
-        try {
-          const res = await fetch(`${apiBase}/api/financial-report-autoread?symbol=${encodeURIComponent(code)}`);
-          const data = await parseJsonResponse(res, "Financial report auto-read endpoint");
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-
-          renderFinancialReportAutoreadAnswers(data.answers || []);
-          renderReportCurrentMode(data.current_mode || null);
-          renderReportLlmStatus(data);
-          renderReportLlmAnalysis(data.llm_analysis || null);
-
-          const reportTitle = data.report?.title ? `Title: ${escapeHtmlAttribute(data.report.title)}. ` : "";
-          const reportDate = data.report?.published_at
-            ? `Published: ${escapeHtmlAttribute(data.report.published_at)}. `
-            : "";
-          const reportPages =
-            data.report?.pdf_pages === null || data.report?.pdf_pages === undefined
-              ? ""
-              : `PDF pages: ${data.report.pdf_pages}. `;
-          const reportLink = data.report?.document_url || data.report?.detail_url;
-          const reportUrlHtml = reportLink
-            ? `Source: <a href="${escapeHtmlAttribute(reportLink)}" target="_blank" rel="noreferrer">Open report</a>.`
-            : "";
-          const reportMetaHtml = `${reportTitle}${reportDate}${reportPages}${reportUrlHtml}`;
-          if (reportMetaHtml.trim()) {
-            reportSourceMetaEl.innerHTML = reportMetaHtml;
-          } else {
-            reportSourceMetaEl.textContent =
-              "Report source metadata unavailable. The current three-question output is based on historical financial context fallback.";
-          }
-
-          const displayName = data.symbol_name ? `${data.symbol} ${data.symbol_name}` : data.symbol;
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
-          reportStatusEl.textContent = `Auto-read completed for ${displayName}. As of: ${data.as_of || "-"}.${warningText}`;
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            reportStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            reportStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          autoReadReportBtn.disabled = false;
-        }
-      }
-
-      function clearMacroTable() {
-        macroTableHead.innerHTML = "";
-        macroTableBody.innerHTML = "";
-      }
-
-      function clearMacroSignals() {
-        macroSignalTableBody.innerHTML = "";
-      }
-
-      function renderIndustryRows(rows) {
-        industryTableBody.innerHTML = "";
-        rows.forEach((row) => {
-          const oneYear = row["1y_percentile"] == null ? "-" : `${row["1y_percentile"]}%`;
-          const fiveYear = row["5y_percentile"] == null ? "-" : `${row["5y_percentile"]}%`;
-          const source = row.source || "-";
-          const status = row.status || "-";
-          const errorText = row.error || "-";
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.industry ?? "-"}</td>
-            <td>${row.indicator ?? "-"}</td>
-            <td>${formatNumber(row.value)}</td>
-            <td>${oneYear}</td>
-            <td>${fiveYear}</td>
-            <td>${source}</td>
-            <td>${status}</td>
-            <td>${errorText}</td>
-          `;
-          industryTableBody.appendChild(tr);
-        });
-      }
-
-      function flattenIndustryGroups(data) {
-        const groups = data?.groups;
-        if (!Array.isArray(groups) || !groups.length) {
-          return Array.isArray(data?.rows) ? data.rows : [];
-        }
-        const out = [];
-        groups.forEach((group) => {
-          (group?.rows || []).forEach((row) => out.push(row));
-        });
-        return out;
-      }
-
-      function renderMacroSignals(rows) {
-        clearMacroSignals();
-        rows.forEach((row) => {
-          const extraNote =
-            row.indicator === "china_pmi"
-              ? `<span class="signal-note" title="china_pmi uses fixed threshold rule: >=50 Expansion, <50 Contraction">Threshold: 50</span>`
-              : "";
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.indicator ?? "-"}</td>
-            <td>${formatNumber(row.value)}</td>
-            <td>${row.percentile ?? "-"}%</td>
-            <td><span class="badge-signal ${row.signal_color || "yellow"}">${row.signal_label || "-"}</span>${extraNote}</td>
-          `;
-          macroSignalTableBody.appendChild(tr);
-        });
-      }
-
-      function renderValuationPanel(rows) {
-        valuationPanelEl.innerHTML = "";
-        const signalMap = {};
-        rows.forEach((row) => {
-          signalMap[row.indicator] = row;
-        });
-
-        valuationIndicatorConfig.forEach((item) => {
-          const signal = signalMap[item.key];
-          const card = document.createElement("div");
-          card.className = "valuation-item";
-
-          if (!signal) {
-            card.innerHTML = `
-              <div class="name">${item.label}</div>
-              <div class="meta">Value: - | Percentile: -</div>
-              <div class="meta"><span class="badge-signal yellow">No Data</span></div>
-            `;
-            valuationPanelEl.appendChild(card);
-            return;
-          }
-
-          card.innerHTML = `
-            <div class="name">${item.label}</div>
-            <div class="meta">Value: ${formatNumber(signal.value)} | Percentile: ${signal.percentile}%</div>
-            <div class="meta"><span class="badge-signal ${signal.signal_color || "yellow"}">${signal.signal_label || "-"}</span></div>
-          `;
-          valuationPanelEl.appendChild(card);
-        });
-      }
-
-      function fillMissingValues(rows) {
-        if (!rows.length) return [];
-        const asc = [...rows].reverse();
-        const keys = Object.keys(asc[0]).filter((k) => k !== "date");
-        const last = {};
-
-        const outAsc = asc.map((row) => {
-          const cloned = { ...row };
-          keys.forEach((k) => {
-            if (cloned[k] === null || cloned[k] === undefined || cloned[k] === "") {
-              if (last[k] !== undefined) cloned[k] = last[k];
-            } else {
-              last[k] = cloned[k];
-            }
-          });
-          return cloned;
-        });
-
-        return outAsc.reverse();
-      }
-
-      function buildMissingHint(rows) {
-        if (!rows.length) return "No data loaded.";
-        const keys = Object.keys(rows[0]).filter((k) => k !== "date");
-        const parts = keys.map((k) => {
-          let nn = 0;
-          rows.forEach((r) => {
-            if (r[k] !== null && r[k] !== undefined && r[k] !== "") nn += 1;
-          });
-          return `${k}: ${nn}/${rows.length}`;
-        });
-        return `Non-null counts in current view: ${parts.join(" | ")}`;
-      }
-
-      function renderMacroRows(rows) {
-        clearMacroTable();
-        if (!rows.length) {
-          macroHintEl.textContent = "No rows found in selected table/limit.";
-          return;
-        }
-
-        const keys = Object.keys(rows[0]).sort((a, b) => {
-          if (a === "date") return -1;
-          if (b === "date") return 1;
-          return 0;
-        });
-
-        const headTr = document.createElement("tr");
-        keys.forEach((k) => {
-          const th = document.createElement("th");
-          th.textContent = k;
-          headTr.appendChild(th);
-        });
-        macroTableHead.appendChild(headTr);
-
-        rows.forEach((row) => {
-          const tr = document.createElement("tr");
-          keys.forEach((k) => {
-            const td = document.createElement("td");
-            td.textContent = k === "date" ? row[k] ?? "-" : formatNumber(row[k]);
-            tr.appendChild(td);
-          });
-          macroTableBody.appendChild(tr);
-        });
-
-        macroHintEl.textContent = buildMissingHint(rows);
-      }
-
-      async function loadMacroIndicators() {
-        const table = macroTableSelect.value;
-        const limit = Math.max(1, Math.min(500, Number(macroLimitInput.value || 30)));
-        macroLimitInput.value = String(limit);
-
-        loadMacroBtn.disabled = true;
-        macroStatusEl.textContent = "Loading macro indicators...";
-        macroHintEl.textContent = "";
-        clearMacroTable();
-
-        try {
-          const rowsUrl = `${apiBase}/api/macro-indicators?table=${encodeURIComponent(table)}&limit=${limit}`;
-          const signalsUrl = `${apiBase}/macro_signals?table=${encodeURIComponent(table)}`;
-
-          const [res, signalRes] = await Promise.all([fetch(rowsUrl), fetch(signalsUrl)]);
-          const [data, signalData] = await Promise.all([
-            parseJsonResponse(res),
-            parseJsonResponse(signalRes, "Macro signals endpoint"),
-          ]);
-          if (!res.ok) throw new Error(data.detail || "Request failed");
-          if (!signalRes.ok) throw new Error(signalData.detail || "Signal request failed");
-
-          lastMacroRows = data.rows || [];
-          const viewRows = macroFillMissing.checked ? fillMissingValues(lastMacroRows) : lastMacroRows;
-          renderMacroRows(viewRows);
-          renderMacroSignals(signalData || []);
-          renderValuationPanel(signalData || []);
-          const displayName = macroTableLabelMap[table] || table;
-          macroStatusEl.textContent = `Loaded ${displayName}. Rows: ${viewRows.length}. Limit: ${limit}.`;
-        } catch (err) {
-          lastMacroRows = [];
-          clearMacroTable();
-          clearMacroSignals();
-          valuationPanelEl.innerHTML = "";
-          if (isBackendUnreachable(err)) {
-            macroStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}. Table cleared (not refreshed).`;
-          } else {
-            macroStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          loadMacroBtn.disabled = false;
-        }
-      }
-
-      async function loadIndustryCycles() {
-        loadIndustryBtn.disabled = true;
-        industryStatusEl.textContent = "Loading industry cycles...";
-        industryTableBody.innerHTML = "";
-
-        try {
-          const res = await fetch(`${apiBase}/industry_cycles?refresh=true`);
-          const data = await parseJsonResponse(res);
-          if (!res.ok) throw new Error(data.detail || `Request failed (HTTP ${res.status})`);
-          const rows = flattenIndustryGroups(data);
-          renderIndustryRows(rows);
-          const warningText = (data.warnings || []).length ? ` Warnings: ${(data.warnings || []).join(" | ")}` : "";
-          industryStatusEl.textContent = `Loaded ${rows.length} indicators. As of: ${data.as_of || "-"}.${warningText}`;
-        } catch (err) {
-          if (isBackendUnreachable(err)) {
-            industryStatusEl.textContent = `Error: Cannot connect to backend at ${apiBase}.`;
-          } else {
-            industryStatusEl.textContent = `Error: ${err.message}`;
-          }
-        } finally {
-          loadIndustryBtn.disabled = false;
-        }
-      }
-
-      analyzeBtn.addEventListener("click", analyzeSingleStock);
-      stockCodeInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") analyzeSingleStock();
-      });
-      priceLimitSelect.addEventListener("change", () => renderPriceRows(currentPriceRows));
-      document.querySelectorAll("[data-accordion-toggle]").forEach((buttonEl) => {
-        buttonEl.addEventListener("click", () => {
-          const bodyId = buttonEl.getAttribute("aria-controls");
-          const bodyEl = bodyId ? document.getElementById(bodyId) : null;
-          const cardEl = buttonEl.closest(".accordion-card");
-          if (!bodyEl || !cardEl) return;
-          const isExpanded = buttonEl.getAttribute("aria-expanded") === "true";
-          buttonEl.setAttribute("aria-expanded", String(!isExpanded));
-          bodyEl.hidden = isExpanded;
-          cardEl.classList.toggle("is-open", !isExpanded);
-        });
-      });
-
-      analyzeWatchlistBtn.addEventListener("click", analyzeWatchlist);
-
-      loadMacroBtn.addEventListener("click", loadMacroIndicators);
-      macroTableSelect.addEventListener("change", loadMacroIndicators);
-      macroLimitInput.addEventListener("change", loadMacroIndicators);
-      macroFillMissing.addEventListener("change", () => {
-        const rows = macroFillMissing.checked ? fillMissingValues(lastMacroRows) : lastMacroRows;
-        renderMacroRows(rows);
-      });
-      loadIndustryBtn.addEventListener("click", loadIndustryCycles);
-      loadReportBtn.addEventListener("click", loadFinancialReport);
-      autoReadReportBtn.addEventListener("click", autoReadAnnualReport);
-      saveLlmSessionBtn.addEventListener("click", saveLlmSessionConfig);
-      testLlmConnectionBtn.addEventListener("click", testLlmConnection);
-      [llmProviderInput, llmBaseUrlInput, llmModelInput, llmApiKeyInput].forEach((inputEl) => {
-        inputEl.addEventListener("input", persistLlmConfigToLocalStorage);
-      });
-      reportCodeInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") loadFinancialReport();
-      });
-      analyzeReportUrlBtn.addEventListener("click", loadFinancialReportFromUrl);
-      reportUrlInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") loadFinancialReportFromUrl();
-      });
-
-      resetMetrics();
-      hydrateLlmFormFromLocalStorage();
-      resetFinancialReportPanel();
-      loadLlmSessionStatus();
-      loadMacroIndicators();
-      macroLoadedOnce = true;
-      // Poll realtime prices every 30 seconds; realtime values are not persisted.
-      setInterval(refreshRealtimePrices, 30000);
-    </script>
+    <script type="module" src="/static/js/index.js"></script>
   </body>
 </html>
